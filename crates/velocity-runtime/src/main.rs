@@ -415,6 +415,36 @@ fn main() -> Result<()> {
         }
     }
 
+    // Step 10b: Create desktop shortcut if manifest requests it
+    if manifest.install.create_desktop_shortcut && !manifest.shortcuts.desktop {
+        let desktop_exe = if target_exe.as_os_str().is_empty() {
+            install_dir.join(&manifest.app.name)
+        } else {
+            target_exe.clone()
+        };
+        match velocity_core::shortcuts::create_shortcuts(
+            &velocity_config::ShortcutConfig {
+                desktop: true,
+                start_menu: false,
+                quick_launch: false,
+                custom: vec![],
+            },
+            &manifest.app.name,
+            &desktop_exe,
+            install_dir,
+            None,
+        ) {
+            Ok(()) => {
+                info!("Created desktop shortcut (manifest setting)");
+                logging::log_success("Desktop shortcut created");
+            }
+            Err(e) => {
+                warn!("Desktop shortcut error: {}", e);
+                logging::log_error("DESKTOP_SHORTCUT", &e.to_string());
+            }
+        }
+    }
+
     // Step 11: Apply file associations
     if !manifest.file_associations.is_empty() {
         info!("Creating file associations...");
