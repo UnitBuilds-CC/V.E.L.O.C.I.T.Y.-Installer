@@ -1,9 +1,12 @@
-#![cfg(target_os = "windows")]
 //! Dependency condition resolver.
 //!
 //! Delegates to the unified `condition` module for evaluating condition
 //! expressions. This module provides a convenience wrapper that returns
 //! `bool` (defaulting to `true` on error) for use in dependency resolution.
+//!
+//! Cross-platform: delegates to condition.rs which supports cross-platform
+//! conditions (file, dir, env, arch) and returns errors for Windows-only
+//! conditions on Unix.
 
 use crate::condition;
 use tracing::debug;
@@ -50,15 +53,13 @@ mod tests {
     #[test]
     fn test_file_missing_condition() {
         assert!(evaluate_condition(
-            "file_missing:C:\\nonexistent_file_xyz.dll"
+            "file_missing:/nonexistent_file_xyz_12345.dll"
         ));
     }
 
     #[test]
-    fn test_file_exists_condition() {
-        assert!(evaluate_condition(
-            "file_exists:C:\\Windows\\System32\\kernel32.dll"
-        ));
+    fn test_dir_exists_condition() {
+        assert!(evaluate_condition("dir_exists:."));
     }
 
     #[test]
@@ -69,10 +70,16 @@ mod tests {
 
     #[test]
     fn test_evaluate_all_conditions() {
-        let conditions = vec!["always".to_string(), "file_exists:C:\\Windows".to_string()];
+        let conditions = vec!["always".to_string(), "dir_exists:.".to_string()];
         assert!(evaluate_all_conditions(&conditions));
 
         let conditions_with_false = vec!["always".to_string(), "never".to_string()];
         assert!(!evaluate_all_conditions(&conditions_with_false));
+    }
+
+    #[test]
+    fn test_env_condition() {
+        assert!(evaluate_condition("env:PATH"));
+        assert!(!evaluate_condition("env:VELOCITY_NONEXISTENT_VAR_XYZ"));
     }
 }

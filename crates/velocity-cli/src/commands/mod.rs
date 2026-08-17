@@ -1,6 +1,5 @@
 pub mod build;
 pub mod check;
-#[cfg(target_os = "windows")]
 pub mod dep;
 pub mod detect;
 pub mod info;

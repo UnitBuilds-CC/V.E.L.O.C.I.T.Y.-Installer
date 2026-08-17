@@ -328,18 +328,29 @@ impl ScriptEngine {
                 Ok(())
             }
             ActionType::WriteRegistry { key, name, value } => {
-                let resolved_key = self.substitute(key);
-                let resolved_value = self.substitute(value);
-                // Use the existing registry module
-                let entry = velocity_config::RegistryEntry {
-                    key: resolved_key,
-                    name: Some(name.clone()),
-                    value: resolved_value,
-                    value_type: "string".to_string(),
-                    root: "HKLM".to_string(),
-                    delete_on_uninstall: true,
-                };
-                crate::registry::apply_registry_entries(&[entry])
+                #[cfg(target_os = "windows")]
+                {
+                    let resolved_key = self.substitute(key);
+                    let resolved_value = self.substitute(value);
+                    // Use the existing registry module
+                    let entry = velocity_config::RegistryEntry {
+                        key: resolved_key,
+                        name: Some(name.clone()),
+                        value: resolved_value,
+                        value_type: "string".to_string(),
+                        root: "HKLM".to_string(),
+                        delete_on_uninstall: true,
+                    };
+                    crate::registry::apply_registry_entries(&[entry])
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = (key, name, value); // suppress unused warnings
+                    Err(CoreError::other(
+                        "registry",
+                        "Registry operations are only supported on Windows",
+                    ))
+                }
             }
             ActionType::SetEnvVar { name, value, scope } => {
                 let resolved_value = self.substitute(value);

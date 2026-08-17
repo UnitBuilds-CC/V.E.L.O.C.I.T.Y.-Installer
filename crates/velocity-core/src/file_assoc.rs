@@ -15,6 +15,7 @@ use velocity_config::FileAssociationEntry;
 mod windows_impl {
     use super::*;
     use crate::error::{CoreError, Result};
+    use tracing::warn;
     use winreg::enums::*;
     use winreg::RegKey;
 
@@ -113,7 +114,9 @@ mod windows_impl {
         if let Ok(ext_key) = hkcr.open_subkey(&ext) {
             if let Ok(current_prog_id) = ext_key.get_value::<String, _>("") {
                 if current_prog_id == assoc.handler {
-                    let _ = hkcr.delete_subkey_all(&ext);
+                    if let Err(e) = hkcr.delete_subkey_all(&ext) {
+                        warn!("Failed to remove registry extension key {}: {}", ext, e);
+                    }
                     logging::log_op("FILE_ASSOC", &format!("Removed extension key for {}", ext));
                 } else {
                     logging::log_op(
@@ -124,11 +127,16 @@ mod windows_impl {
                         ),
                     );
                 }
-            } else {
-                let _ = hkcr.delete_subkey_all(&ext);
+            } else if let Err(e) = hkcr.delete_subkey_all(&ext) {
+                warn!("Failed to remove registry extension key {}: {}", ext, e);
             }
         }
-        let _ = hkcr.delete_subkey_all(&assoc.handler);
+        if let Err(e) = hkcr.delete_subkey_all(&assoc.handler) {
+            warn!(
+                "Failed to remove registry handler key {}: {}",
+                assoc.handler, e
+            );
+        }
         logging::log_success(&format!("File association {} removed", ext));
         Ok(())
     }
@@ -305,6 +313,7 @@ mod linux_impl {
 mod macos_impl {
     use super::*;
     use crate::error::{CoreError, Result};
+    use tracing::warn;
 
     pub fn apply_file_associations(
         associations: &[FileAssociationEntry],
@@ -337,17 +346,35 @@ mod macos_impl {
         );
 
         // Register via defaults (LSHandler)
-        let _ = std::process::Command::new("defaults")
+        match std::process::Command::new("defaults")
             .args(["write", "com.apple.LaunchServices/com.apple.launchservices.secure",
                    "LSHandlers",
                    "-array-add",
                    &format!("{{LSHandlerContentTag='public.{}';LSHandlerContentTagClass='public.filename-extension';LSHandlerRoleAll='{}';}}", ext, bundle_id)])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!("defaults write failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+            }
+            Err(e) => {
+                warn!("defaults command not available: {}", e);
+            }
+            _ => {}
+        }
 
         // Rebuild Launch Services database to pick up changes
-        let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+        match std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
             .args(["-kill", "-r", "-domain", "local", "-domain", "user"])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!("lsregister rebuild failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+            }
+            Err(e) => {
+                warn!("lsregister command not available: {}", e);
+            }
+            _ => {}
+        }
 
         logging::log_success(&format!(
             "File association .{} -> {} created",
@@ -377,18 +404,39 @@ mod macos_impl {
         );
 
         // Remove the handler registration
-        let _ = std::process::Command::new("defaults")
+        match std::process::Command::new("defaults")
             .args([
                 "delete",
                 "com.apple.LaunchServices/com.apple.launchservices.secure",
                 "LSHandlers",
             ])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!(
+                    "defaults delete failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Err(e) => {
+                warn!("defaults command not available: {}", e);
+            }
+            _ => {}
+        }
 
         // Rebuild database
-        let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+        match std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
             .args(["-kill", "-r", "-domain", "local", "-domain", "user"])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!("lsregister rebuild failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+            }
+            Err(e) => {
+                warn!("lsregister command not available: {}", e);
+            }
+            _ => {}
+        }
 
         logging::log_success(&format!("File association .{} removed", ext));
         Ok(())
