@@ -30,6 +30,9 @@ pub mod reboot;
 pub mod installer_mutex;
 pub mod checksum;
 pub mod encryption;
+pub mod updater;
+pub mod component_tree;
+pub mod scripting;
 pub mod error;
 
 pub use error::*;

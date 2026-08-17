@@ -107,6 +107,36 @@ fn main() -> Result<()> {
 
     info!("Installing: {} v{}", manifest.app.name, manifest.app.version);
 
+    // Step 1.2: Check for updates (non-blocking, best-effort)
+    if let Some(ref update_url) = manifest.uninstall.update_url {
+        if !update_url.is_empty() && !args.silent {
+            info!("Checking for updates...");
+            match velocity_core::updater::check_for_update(&manifest.app.version, update_url) {
+                Ok(info) if info.update_available => {
+                    info!("Update available: {}", info.latest_version);
+                    logging::log_op("UPDATE", &format!("New version {} available", info.latest_version));
+                    let open_url = velocity_ui::classic::show_update_notification(
+                        &manifest.app.name,
+                        &manifest.app.version,
+                        &info.latest_version,
+                        info.release_notes.as_deref(),
+                    );
+                    if open_url && !info.download_url.is_empty() {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &info.download_url])
+                            .spawn();
+                    }
+                }
+                Ok(_) => {
+                    info!("No updates available");
+                }
+                Err(e) => {
+                    warn!("Update check failed: {}", e);
+                }
+            }
+        }
+    }
+
     // Step 1.5: Decrypt payload if password-protected
     if velocity_core::encryption::is_encrypted(&payload_data) {
         info!("Payload is encrypted, password required");
@@ -290,26 +320,24 @@ fn main() -> Result<()> {
     // Initialize install logger in the target directory
     let _final_log = logging::move_log_to_install_dir(install_dir, &manifest.app.name).ok();
 
-    // Step 6.5: Run pre-install scripts
-    for cmd in &manifest.scripts.pre_install {
-        info!("Running pre-install: {}", cmd);
-        logging::log_op("SCRIPT", cmd);
-        let output = std::process::Command::new("cmd")
-            .args(["/C", cmd])
-            .current_dir(install_dir)
-            .output();
-        match output {
-            Ok(out) if !out.status.success() => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                warn!("Pre-install script failed: {}", stderr);
-                logging::log_error("SCRIPT", &format!("{}: {}", cmd, stderr));
-            }
-            Err(e) => {
-                warn!("Pre-install script error: {}", e);
-                logging::log_error("SCRIPT", &format!("{}: {}", cmd, e));
-            }
-            _ => {
-                logging::log_success(&format!("Pre-install: {}", cmd));
+    // Step 6.5: Run pre-install scripts using the scripting engine
+    if !manifest.scripts.pre_install.is_empty() {
+        info!("Running pre-install scripts...");
+        logging::log_op("SCRIPT", &format!("Running {} pre-install script(s)", manifest.scripts.pre_install.len()));
+        let script_engine = velocity_core::scripting::ScriptEngine::new(
+            velocity_core::scripting::build_variable_context(
+                &install_dir.to_string_lossy(),
+                &manifest.app.name,
+                &manifest.app.version,
+            ),
+        );
+        let results = script_engine.execute_shell_commands(&manifest.scripts.pre_install);
+        for r in &results {
+            if r.success {
+                logging::log_success(&format!("Pre-install: {}", r.action_name));
+            } else {
+                warn!("Pre-install script failed: {:?}", r.error);
+                logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
             }
         }
     }
@@ -647,26 +675,24 @@ fn main() -> Result<()> {
         }
     }
 
-    // Step 16: Run post-install scripts
-    for cmd in &manifest.scripts.post_install {
-        info!("Running post-install: {}", cmd);
-        logging::log_op("SCRIPT", cmd);
-        let output = std::process::Command::new("cmd")
-            .args(["/C", cmd])
-            .current_dir(install_dir)
-            .output();
-        match output {
-            Ok(out) if !out.status.success() => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                warn!("Post-install script failed: {}", stderr);
-                logging::log_error("SCRIPT", &format!("{}: {}", cmd, stderr));
-            }
-            Err(e) => {
-                warn!("Post-install script error: {}", e);
-                logging::log_error("SCRIPT", &format!("{}: {}", cmd, e));
-            }
-            _ => {
-                logging::log_success(&format!("Post-install: {}", cmd));
+    // Step 16: Run post-install scripts using the scripting engine
+    if !manifest.scripts.post_install.is_empty() {
+        info!("Running post-install scripts...");
+        logging::log_op("SCRIPT", &format!("Running {} post-install script(s)", manifest.scripts.post_install.len()));
+        let script_engine = velocity_core::scripting::ScriptEngine::new(
+            velocity_core::scripting::build_variable_context(
+                &install_dir.to_string_lossy(),
+                &manifest.app.name,
+                &manifest.app.version,
+            ),
+        );
+        let results = script_engine.execute_shell_commands(&manifest.scripts.post_install);
+        for r in &results {
+            if r.success {
+                logging::log_success(&format!("Post-install: {}", r.action_name));
+            } else {
+                warn!("Post-install script failed: {:?}", r.error);
+                logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
             }
         }
     }

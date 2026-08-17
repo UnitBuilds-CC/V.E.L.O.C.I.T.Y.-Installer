@@ -66,6 +66,17 @@ pub fn download_file(
     Ok(output_path)
 }
 
+/// Download content from a URL into memory (no file written to disk).
+///
+/// Returns the raw bytes downloaded. Useful for fetching small payloads
+/// such as version-info JSON for the self-update mechanism.
+pub fn download_to_memory(url: &str) -> Result<Vec<u8>> {
+    info!("Downloading to memory: {}", url);
+    let data = download_with_winhttp(url, None, None)?;
+    info!("Downloaded {} bytes (in memory)", data.len());
+    Ok(data)
+}
+
 /// Download a file with resume support.
 ///
 /// If a partial download exists at the output path, attempts to resume

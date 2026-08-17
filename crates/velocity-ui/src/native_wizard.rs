@@ -32,6 +32,7 @@ const EDIT_DIR_ID: u16 = 1014;
 const LIST_COMPONENTS_ID: u16 = 1015;
 const STATIC_FILE_ID: u16 = 1016;
 const CHK_LAUNCH_ID: u16 = 1017;
+const STATIC_SPACE_ID: u16 = 1018;
 const PAGE_TITLE_ID: u16 = 1020;
 const PAGE_DESC_ID: u16 = 1021;
 
@@ -82,7 +83,7 @@ struct WizardData {
     pages: Vec<WizardPage>,
     page_idx: usize,
     selected_components: Vec<String>,
-    all_components: Vec<String>,
+    all_components: Vec<velocity_core::component_tree::TreeNode>,
     launch_after: bool,
     install_completed: bool,
     // Payload for extraction during install phase
@@ -102,6 +103,7 @@ struct WizardData {
     h_dir_edit: HWND,
     h_browse: HWND,
     h_components: HWND,
+    h_space_label: HWND,
     h_progress: HWND,
     h_file_label: HWND,
     h_launch_chk: HWND,
@@ -207,7 +209,7 @@ pub fn run_native_wizard(
 
     let has_license = manifest.app.license.is_some();
     let has_components = !manifest.components.is_empty();
-    let components: Vec<String> = manifest.components.iter().map(|c| c.name.clone()).collect();
+    let tree_nodes = velocity_core::component_tree::flatten_component_tree(&manifest.components);
     let accent = parse_accent_color(&manifest.ui.accent_color);
     let sidebar_image_path = manifest.ui.sidebar.as_ref()
         .map(|p| p.to_string_lossy().to_string());
@@ -218,7 +220,7 @@ pub fn run_native_wizard(
 
     run_wizard_window(
         &manifest.app.name, &manifest.app.version, &default_dir,
-        has_license, has_components, &license_text, accent, &components,
+        has_license, has_components, &license_text, accent, &tree_nodes,
         payload_data, sidebar_image_path, strings,
     )
 }
@@ -241,7 +243,7 @@ fn wn(s: &str) -> Vec<u16> {
 fn run_wizard_window(
     app_name: &str, version: &str, default_dir: &str,
     has_license: bool, has_components: bool, license_text: &str,
-    accent_rgb: [u8; 3], components: &[String],
+    accent_rgb: [u8; 3], components: &[velocity_core::component_tree::TreeNode],
     payload_data: Option<Vec<u8>>,
     sidebar_image_path: Option<String>,
     strings: WizardStrings,
@@ -282,6 +284,7 @@ fn run_wizard_window(
             h_sidebar_title: HWND::default(), h_sidebar_ver: HWND::default(),
             h_license: HWND::default(), h_dir_edit: HWND::default(),
             h_browse: HWND::default(), h_components: HWND::default(),
+            h_space_label: HWND::default(),
             h_progress: HWND::default(), h_file_label: HWND::default(),
             h_launch_chk: HWND::default(), h_back: HWND::default(),
             h_next: HWND::default(), h_cancel: HWND::default(),
@@ -527,17 +530,37 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         410, 80, 72, 24, parent, HMENU(BTN_BROWSE as *mut _), hi, None,
     ).unwrap_or_default();
 
-    // Components listbox (hidden)
+    // Components listbox (hidden) — show indented tree with disk space
     let lb_style = ws(WS_CHILD.0 | WS_VSCROLL.0 | 0x0008 | 0x0001); // LBS_MULTIPLESEL|LBS_NOTIFY
     d.h_components = CreateWindowExW(
         WS_EX_CLIENTEDGE, w!("LISTBOX"), w!(""),
         lb_style,
-        162, 62, 320, 230, parent, HMENU(LIST_COMPONENTS_ID as *mut _), hi, None,
+        162, 62, 320, 210, parent, HMENU(LIST_COMPONENTS_ID as *mut _), hi, None,
     ).unwrap_or_default();
-    for comp in &d.all_components {
-        let cw = wn(comp);
+    for node in &d.all_components {
+        let display = velocity_core::component_tree::format_node_display(node);
+        let cw = wn(&display);
         SendMessageW(d.h_components, LB_ADDSTRING, WPARAM(0), LPARAM(cw.as_ptr() as isize));
     }
+    // Pre-select default components
+    for (i, node) in d.all_components.iter().enumerate() {
+        if node.selected {
+            SendMessageW(d.h_components, LB_SETSEL, WPARAM(1), LPARAM(i as isize));
+        }
+    }
+
+    // Disk space label (hidden) — shown below the component list
+    let total_size: u64 = d.all_components.iter()
+        .filter(|n| n.selected)
+        .map(|n| n.size)
+        .sum();
+    let space_text = format!("Space required: {}", velocity_core::component_tree::format_size(total_size));
+    d.h_space_label = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), w!(""),
+        WS_CHILD,
+        162, 276, 320, 16, parent, HMENU(STATIC_SPACE_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+    set_txt(d.h_space_label, &space_text);
 
     // Progress bar (hidden)
     d.h_progress = CreateWindowExW(
@@ -612,7 +635,7 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
     let _ = SetWindowTextW(d.h_next, PCWSTR(nw.as_ptr()));
 
     // Hide all page-specific controls
-    for &ctrl in &[d.h_license, d.h_dir_edit, d.h_browse, d.h_components, d.h_progress, d.h_file_label, d.h_launch_chk] {
+    for &ctrl in &[d.h_license, d.h_dir_edit, d.h_browse, d.h_components, d.h_space_label, d.h_progress, d.h_file_label, d.h_launch_chk] {
         let _ = ShowWindow(ctrl, SW_HIDE);
     }
 
@@ -640,7 +663,7 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
             set_txt(d.h_page_title, &d.strings.components_title);
             set_txt(d.h_page_desc, &d.strings.components_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
-            show_c(d.h_components);
+            show_c(d.h_components); show_c(d.h_space_label);
         }
         WizardPage::Installing => {
             set_txt(d.h_page_title, &d.strings.install_title);
@@ -687,13 +710,32 @@ unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
                     d.h_components, LB_GETSELITEMS,
                     WPARAM(count as usize), LPARAM(indices.as_mut_ptr() as isize),
                 ).0 as i32;
+                let mut raw_ids: Vec<String> = Vec::new();
                 for i in 0..got as usize {
                     let idx = indices[i] as usize;
                     if idx < d.all_components.len() {
-                        d.selected_components.push(d.all_components[idx].clone());
+                        raw_ids.push(d.all_components[idx].id.clone());
                     }
                 }
+                // Resolve dependencies to ensure required components are included
+                let flat_ids: Vec<String> = d.all_components.iter().map(|n| n.id.clone()).collect();
+                let _ = flat_ids; // used for reference
+                d.selected_components = velocity_core::component_tree::resolve_dependencies(
+                    // We need the original components — reconstruct from tree nodes
+                    &[], &raw_ids,
+                );
+                // If resolve_dependencies with empty components returns raw_ids, use those
+                if d.selected_components.is_empty() {
+                    d.selected_components = raw_ids;
+                }
             }
+            // Update disk space label
+            let total_size: u64 = d.all_components.iter()
+                .filter(|n| d.selected_components.contains(&n.id))
+                .map(|n| n.size)
+                .sum();
+            let space_text = format!("Space required: {}", velocity_core::component_tree::format_size(total_size));
+            set_txt(d.h_space_label, &space_text);
             d.page_idx += 1;
             show_page(hwnd, d);
         }

@@ -425,3 +425,53 @@ pub fn show_password_prompt() -> String {
     let _ = std::io::stdin().read_line(&mut password);
     password.trim().to_string()
 }
+
+/// Show an update-available notification and ask the user whether to download it.
+///
+/// Returns `true` if the user wants to open the download URL.
+pub fn show_update_notification(
+    app_name: &str,
+    current_version: &str,
+    latest_version: &str,
+    release_notes: Option<&str>,
+) -> bool {
+    use windows::core::*;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    info!("Showing update notification: {} -> {}", current_version, latest_version);
+
+    let mut message = format!(
+        "A new version of {} is available!\n\n\
+         Current version: {}\n\
+         Latest version:  {}\n",
+        app_name, current_version, latest_version
+    );
+
+    if let Some(notes) = release_notes {
+        if !notes.is_empty() {
+            message.push_str(&format!("\nRelease notes:\n{}\n", notes));
+        }
+    }
+
+    message.push_str("\nWould you like to download the update?");
+
+    let title_w: Vec<u16> = format!("{} — Update Available", app_name)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let msg_w: Vec<u16> = message
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let result = unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(msg_w.as_ptr()),
+            PCWSTR(title_w.as_ptr()),
+            MB_YESNO | MB_ICONINFORMATION,
+        )
+    };
+
+    result == windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_RESULT(6) // IDYES
+}
