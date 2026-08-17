@@ -68,3 +68,13 @@ pub fn show_complete(app_name: &str, install_dir: &PathBuf) {
         ),
     );
 }
+
+/// Show an error message.
+pub fn show_error(title: &str, message: &str) {
+    classic::show_error(title, message);
+}
+
+/// Show the finish dialog with option to launch the app.
+pub fn show_finish(app_name: &str, install_dir: &PathBuf, run_after: Option<&str>) -> bool {
+    classic::show_finish_dialog(app_name, install_dir, run_after)
+}

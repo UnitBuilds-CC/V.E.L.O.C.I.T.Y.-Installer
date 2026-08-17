@@ -74,6 +74,36 @@ enum Commands {
 
     /// Show version information
     Version,
+
+    /// Sign an installer executable with a code signing certificate
+    Sign {
+        /// Path to the installer .exe to sign
+        path: String,
+
+        /// Path to the certificate file (.pfx)
+        #[arg(short = 'c', long)]
+        cert: Option<String>,
+
+        /// Certificate SHA1 fingerprint (thumbprint)
+        #[arg(short = 'f', long)]
+        fingerprint: Option<String>,
+
+        /// Certificate subject name
+        #[arg(short = 'n', long)]
+        subject: Option<String>,
+
+        /// Timestamp server URL (RFC 3161)
+        #[arg(short = 't', long)]
+        timestamp: Option<String>,
+
+        /// Description for the signed file
+        #[arg(short = 'd', long)]
+        description: Option<String>,
+
+        /// Verify signature instead of signing
+        #[arg(short = 'v', long)]
+        verify: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -112,6 +142,28 @@ fn main() -> Result<()> {
         Commands::Version => {
             println!("Velocity Installer v{}", env!("CARGO_PKG_VERSION"));
             println!("Built with Rust {}", rustc_version());
+        }
+        Commands::Sign {
+            path,
+            cert,
+            fingerprint,
+            subject,
+            timestamp,
+            description,
+            verify,
+        } => {
+            if verify {
+                commands::sign::verify(&path)?;
+            } else {
+                commands::sign::run(
+                    &path,
+                    cert.as_deref(),
+                    fingerprint.as_deref(),
+                    subject.as_deref(),
+                    timestamp.as_deref(),
+                    description.as_deref(),
+                )?;
+            }
         }
     }
 

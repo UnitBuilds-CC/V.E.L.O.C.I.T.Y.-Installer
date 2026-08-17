@@ -111,7 +111,6 @@ pub fn get_base_exe_size(exe_path: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_create_and_read_payload() {
