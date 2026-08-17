@@ -1,0 +1,18 @@
+{
+    "name": "hello-world",
+    "version": "1.0.0",
+    "author": "Velocity Team",
+    "description": "A sample WASM plugin that logs messages at each lifecycle hook",
+    "entry_point": "plugin.wasm",
+    "supported_events": [
+        "load",
+        "pre_install",
+        "post_install",
+        "error",
+        "unload"
+    ],
+    "api_version": 1,
+    "parameters": {
+        "greeting": "Hello from Velocity Plugin!"
+    }
+}

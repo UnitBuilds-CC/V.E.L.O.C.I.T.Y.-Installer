@@ -4,6 +4,7 @@
 
 pub mod classic;
 pub mod error;
+pub mod modern;
 pub mod native_wizard;
 pub mod progress_dialog;
 pub mod wizard;

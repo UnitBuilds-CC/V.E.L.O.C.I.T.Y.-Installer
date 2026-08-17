@@ -2,6 +2,7 @@
 
 use crate::classic;
 use crate::error::{Result, UiError};
+use crate::modern;
 use crate::native_wizard;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,6 +39,13 @@ pub fn run_install_wizard_with_payload(
             tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
             run_native_with_payload(manifest, payload_data)
         }
+        "webview" | "webview2" => {
+            tracing::info!(
+                "Using WebView2 modern wizard for theme: {}",
+                manifest.ui.theme
+            );
+            run_webview(manifest)
+        }
         _ => Err(UiError::Other(format!(
             "Unknown theme: {}",
             manifest.ui.theme
@@ -68,6 +76,54 @@ fn run_native_with_payload(
     payload_data: Option<Vec<u8>>,
 ) -> Result<InstallWizardResult> {
     let result = native_wizard::run_native_wizard(manifest, payload_data)?;
+
+    if result.cancelled {
+        return Err(UiError::Cancelled);
+    }
+
+    Ok(InstallWizardResult {
+        install_dir: result.install_dir,
+        cancelled: false,
+        launch_after: result.launch_after,
+        selected_components: result.selected_components,
+        install_completed: result.install_completed,
+    })
+}
+
+/// Run the WebView2-based modern wizard.
+fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
+    // Build component list from manifest
+    let components: Vec<(String, String, String, f64, bool, bool)> = manifest
+        .components
+        .iter()
+        .map(|c| {
+            let size_mb = c.size as f64 / (1024.0 * 1024.0);
+            (
+                c.id.clone(),
+                c.name.clone(),
+                c.description.clone().unwrap_or_default(),
+                size_mb,
+                c.selected_by_default,
+                c.mandatory,
+            )
+        })
+        .collect();
+
+    let license_text = manifest
+        .app
+        .license
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+
+    let result = modern::run_modern_wizard(
+        &manifest.app.name,
+        &manifest.app.version,
+        &manifest.app.publisher,
+        &manifest.install.default_dir,
+        &license_text,
+        &components,
+    )?;
 
     if result.cancelled {
         return Err(UiError::Cancelled);

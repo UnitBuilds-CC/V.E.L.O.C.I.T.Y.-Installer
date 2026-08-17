@@ -16,6 +16,7 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 
 ### Installation Experience
 - **Multi-page wizard** — Welcome, License Agreement, Directory Selection, Component Selection, Progress with ETA, and Finish pages
+- **Modern WebView2 UI** — Contemporary wizard with dark/light themes, CSS animations, and JS↔Rust bidirectional RPC (use `--modern` flag or `theme = "webview"`)
 - **Silent mode** — Full unattended installation with `/S`, `/D=path`, `--silent`, `--force` flags (Inno Setup compatible)
 - **Component selection** — Users can choose which features to install (mandatory + optional components)
 - **Progress tracking with ETA** — Real-time progress bar with estimated time remaining
@@ -28,6 +29,13 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 
 ### Ninite-like Dependency Management
 - **Remote dependencies** — Auto-download and silently install prerequisites (VC++ Redist, DirectX, .NET, etc.)
+
+### Plugin System
+- **WASM-based plugins** — Extend installer behavior with sandboxed WebAssembly modules
+- **9 lifecycle hooks** — `on_load`, `on_pre_install`, `on_file_extracted`, `on_post_install`, `on_error`, `on_cancel`, etc.
+- **Host API** — Plugins can log, read/write files, execute commands, access registry, update progress
+- **Auto-discovery** — Drop `.wasm` + `plugin.json` in the `plugins/` directory
+- **Safe by default** — Plugins run in a sandboxed WASM runtime (Wasmtime) with no direct system access
 - **Condition-based installation** — Only install dependencies when needed (registry checks, file checks, arch detection, OS version, Add/Remove Programs lookup)
 - **SHA256 verification** — Integrity checking of all downloaded files
 - **Download resume** — Resumable downloads with HTTP Range requests
@@ -344,7 +352,7 @@ cargo build --release
 cargo test
 ```
 
-187 tests across all crates covering:
+213 tests across all crates covering:
 - Config parsing and validation (14 tests)
 - Archive creation and extraction (3 tests)
 - Payload format (1 test)
@@ -370,6 +378,9 @@ cargo test
 - Rollback correctness including stress (8 tests)
 - Fuzz-like parser robustness (12 tests)
 - Runtime input validation (9 tests)
+- Modern WebView2 wizard (7 tests)
+- WASM plugin API + loader (15 tests)
+- Plugin integration tests (4 tests)
 
 ## Comparison
 
@@ -394,9 +405,10 @@ cargo test
 - [x] **Phase 7: Quality** — Clippy cleanup, E2E integration tests, structured scripting, README updates
 - [x] **Phase 8: Production Hardening** — Stress testing, rollback testing, PBKDF2 key derivation, unsafe safety audit, GitHub Actions CI/CD, crash reporting, code signing docs, fuzz-like parser robustness
 - [x] **Phase 9: Final Fixes** — CSPRNG for encryption (BCryptGenRandom), runtime input validation (install dir, password limits, shell injection protection)
-- [ ] **Phase 2: Modern UI** — WebView2-based wizard with dark/light themes, animations
-- [ ] **Phase 3: Advanced** — WASM plugins, delta compression, full auto-update with download-and-swap
-- [ ] **Phase 4: Ecosystem** — GUI config editor, template marketplace, CI/CD integration
+- [x] **Phase 10: Beta Test + Ops** — Sample installer project, code signing automation, crypto audit, crash telemetry
+- [x] **Phase 2: Modern UI** — WebView2 wizard with dark/light themes, CSS animations, JS↔Rust RPC, `--modern` CLI flag
+- [x] **Phase 3: WASM Plugins** — Plugin trait with 9 lifecycle hooks, Host API, Wasmtime loader, sample plugin, integration tests
+- [ ] **Phase 4: Ecosystem** — GUI config editor, template marketplace, delta compression, full auto-update with download-and-swap
 
 ## License
 

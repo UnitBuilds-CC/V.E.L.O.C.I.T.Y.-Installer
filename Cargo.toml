@@ -70,6 +70,8 @@ pbkdf2 = "0.12"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 aes-gcm = "0.10"
+webview2-com = "0.39"
+wasmtime = "24"
 
 # Internal crates
 velocity-config = { path = "crates/velocity-config" }

@@ -28,6 +28,8 @@ struct RuntimeArgs {
     force: bool,
     /// Password for encrypted installers.
     password: Option<String>,
+    /// Force modern WebView2 wizard regardless of manifest theme.
+    modern_ui: bool,
 }
 
 impl RuntimeArgs {
@@ -37,11 +39,13 @@ impl RuntimeArgs {
         let mut dir = None;
         let mut force = false;
         let mut password = None;
+        let mut modern_ui = false;
 
         for arg in args.iter().skip(1) {
             match arg.as_str() {
                 "/S" | "/s" | "--silent" | "-s" | "/quiet" | "-q" => silent = true,
                 "--force" | "-f" => force = true,
+                "--modern" | "--webview" => modern_ui = true,
                 _ => {
                     // Check for /D= prefix (Inno Setup compatible directory override)
                     if arg.starts_with("/D=") || arg.starts_with("/d=") {
@@ -58,6 +62,7 @@ impl RuntimeArgs {
             dir,
             force,
             password,
+            modern_ui,
         }
     }
 }
@@ -257,7 +262,16 @@ fn main() -> Result<()> {
             install_completed: false,
         }
     } else {
-        match velocity_ui::run_install_wizard_with_payload(&manifest, Some(payload_data.clone())) {
+        // Override theme if --modern flag is passed
+        let mut effective_manifest = manifest.clone();
+        if args.modern_ui {
+            info!("Overriding UI theme to 'webview' (--modern flag)");
+            effective_manifest.ui.theme = "webview".to_string();
+        }
+        match velocity_ui::run_install_wizard_with_payload(
+            &effective_manifest,
+            Some(payload_data.clone()),
+        ) {
             Ok(result) => result,
             Err(velocity_ui::UiError::Cancelled) => {
                 info!("Installation cancelled by user");

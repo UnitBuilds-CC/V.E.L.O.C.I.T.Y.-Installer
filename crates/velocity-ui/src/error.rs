@@ -13,6 +13,9 @@ pub enum UiError {
 
     #[error("{0}")]
     Other(String),
+
+    #[error("Wizard error: {0}")]
+    Wizard(String),
 }
 
 pub type Result<T> = std::result::Result<T, UiError>;
