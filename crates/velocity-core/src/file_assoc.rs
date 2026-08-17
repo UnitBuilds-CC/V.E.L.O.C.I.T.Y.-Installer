@@ -96,6 +96,9 @@ fn apply_single_association(
 }
 
 /// Remove a single file association.
+///
+/// Only removes the ProgID key that we created. The extension key is only
+/// removed if it still points to our ProgID (i.e., no other app has claimed it).
 fn remove_single_association(assoc: &velocity_config::FileAssociationEntry) -> Result<()> {
     let ext = if assoc.extension.starts_with('.') {
         assoc.extension.clone()
@@ -107,10 +110,24 @@ fn remove_single_association(assoc: &velocity_config::FileAssociationEntry) -> R
 
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
 
-    // Remove the extension key
-    let _ = hkcr.delete_subkey_all(&ext);
+    // Only remove the extension key if it still points to our ProgID
+    if let Ok(ext_key) = hkcr.open_subkey(&ext) {
+        if let Ok(current_prog_id) = ext_key.get_value::<String, _>("") {
+            if current_prog_id == assoc.handler {
+                let _ = hkcr.delete_subkey_all(&ext);
+                logging::log_op("FILE_ASSOC", &format!("Removed extension key for {}", ext));
+            } else {
+                logging::log_op("FILE_ASSOC", &format!(
+                    "Skipping extension key {} — now owned by {}", ext, current_prog_id
+                ));
+            }
+        } else {
+            // No default value — safe to remove
+            let _ = hkcr.delete_subkey_all(&ext);
+        }
+    }
 
-    // Remove the ProgID key
+    // Remove the ProgID key that we created
     let _ = hkcr.delete_subkey_all(&assoc.handler);
 
     logging::log_success(&format!("File association {} removed", ext));

@@ -8,7 +8,6 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::SystemTime;
 
 /// Global logger instance.
 static LOGGER: Mutex<Option<InstallLogger>> = Mutex::new(None);
@@ -121,46 +120,7 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 fn timestamp() -> String {
-    let now = SystemTime::now();
-    let duration = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-    let secs = duration.as_secs();
-    
-    // Convert Unix timestamp to human-readable date/time
-    // Simple algorithm: compute year/month/day from days since epoch
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-    
-    // Compute year, month, day from days since 1970-01-01
-    let (year, month, day) = days_to_ymd(days as i64);
-    
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hours, minutes, seconds)
-}
-
-/// Convert days since Unix epoch to (year, month, day).
-fn days_to_ymd(days_since_epoch: i64) -> (i64, u32, u32) {
-    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
-    // Uses floor division throughout (not truncation towards zero).
-    let days = days_since_epoch + 719468;
-    let era = floor_div(days, 146097);
-    let doe = (days - era * 146097) as u32; // day of era [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
-    let mp = (5 * doy + 2) / 153; // month index [0, 11]
-    let d = doy - (153 * mp + 2) / 5 + 1; // day [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // month [1, 12]
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
-}
-
-/// Floor division (rounds towards negative infinity, not towards zero).
-fn floor_div(a: i64, b: i64) -> i64 {
-    let d = a / b;
-    let r = a % b;
-    if (r > 0 && b < 0) || (r < 0 && b > 0) { d - 1 } else { d }
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// The install logger.
@@ -206,39 +166,6 @@ mod tests {
         assert_eq!(&ts[10..11], " ");
         assert_eq!(&ts[13..14], ":");
         assert_eq!(&ts[16..17], ":");
-    }
-
-    #[test]
-    fn test_days_to_ymd_epoch() {
-        // Day 0 = 1970-01-01
-        let (y, m, d) = days_to_ymd(0);
-        assert_eq!((y, m, d), (1970, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_known_date() {
-        // 2000-01-01 = day 10957
-        let (y, m, d) = days_to_ymd(10957);
-        assert_eq!((y, m, d), (2000, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_2024() {
-        // 2024-08-10 = day 19945
-        let (y, m, d) = days_to_ymd(19945);
-        assert_eq!((y, m, d), (2024, 8, 10));
-    }
-
-    #[test]
-    fn test_floor_div_positive() {
-        assert_eq!(floor_div(10, 3), 3);
-        assert_eq!(floor_div(9, 3), 3);
-    }
-
-    #[test]
-    fn test_floor_div_negative() {
-        assert_eq!(floor_div(-1, 146097), -1);
-        assert_eq!(floor_div(-146097, 146097), -1);
     }
 
     #[test]

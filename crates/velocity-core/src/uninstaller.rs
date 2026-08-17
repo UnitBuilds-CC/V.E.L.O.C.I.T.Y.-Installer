@@ -214,33 +214,47 @@ pub fn is_uninstall_mode() -> bool {
 }
 
 /// Read uninstall info from the current executable.
+///
+/// Uses seeking to find the marker and read only the JSON portion,
+/// avoiding loading the entire executable into memory.
 pub fn read_uninstall_info(exe_path: &Path) -> Result<UninstallInfo> {
-    let data = std::fs::read(exe_path)?;
+    use std::io::{Read, Seek, SeekFrom};
 
-    // Find the uninstall marker
+    let mut file = std::fs::File::open(exe_path)?;
+    let file_len = file.metadata()?.len();
+
+    // Search the last 256KB for the marker (same as payload.rs)
     let marker = b"VELOCITY_UNINST_V1";
-    let marker_pos = data
+    let search_start = if file_len > 262144 {
+        file_len - 262144
+    } else {
+        0
+    };
+
+    let search_size = (file_len - search_start) as usize;
+    let mut buf = vec![0u8; search_size];
+    file.seek(SeekFrom::Start(search_start))?;
+    file.read_exact(&mut buf)?;
+
+    // Find marker position
+    let marker_pos = buf
         .windows(marker.len())
         .position(|w| w == marker)
         .ok_or_else(|| CoreError::InvalidPayload("Not an uninstaller".to_string()))?;
 
-    let data_start = marker_pos + marker.len();
-    if data_start + 8 > data.len() {
-        return Err(CoreError::InvalidPayload("Truncated uninstall data".to_string()));
-    }
+    let abs_marker_end = search_start + marker_pos as u64 + marker.len() as u64;
 
-    let len_bytes: [u8; 8] = data[data_start..data_start + 8]
-        .try_into()
-        .map_err(|_| CoreError::InvalidPayload("Invalid length".to_string()))?;
-    let data_len = u64::from_le_bytes(len_bytes) as usize;
+    // Read the data length (8 bytes)
+    file.seek(SeekFrom::Start(abs_marker_end))?;
+    let mut len_buf = [0u8; 8];
+    file.read_exact(&mut len_buf)?;
+    let data_len = u64::from_le_bytes(len_buf) as usize;
 
-    let json_start = data_start + 8;
-    let json_end = json_start + data_len;
-    if json_end > data.len() {
-        return Err(CoreError::InvalidPayload("Truncated uninstall JSON".to_string()));
-    }
+    // Read only the JSON data
+    let mut json_buf = vec![0u8; data_len];
+    file.read_exact(&mut json_buf)?;
 
-    let info: UninstallInfo = serde_json::from_slice(&data[json_start..json_end])
+    let info: UninstallInfo = serde_json::from_slice(&json_buf)
         .map_err(|e| CoreError::InvalidPayload(format!("Invalid uninstall JSON: {}", e)))?;
 
     Ok(info)

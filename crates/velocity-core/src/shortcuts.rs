@@ -99,9 +99,25 @@ pub fn create_lnk(
     use windows::Win32::System::Com::*;
     use windows::Win32::UI::Shell::*;
 
-    unsafe {
-        let _ = CoInitialize(None).ok();
+    /// RAII guard to ensure CoUninitialize is always called after CoInitialize.
+    struct ComGuard;
+    impl ComGuard {
+        fn new() -> Self {
+            unsafe {
+                let _ = CoInitialize(None).ok();
+            }
+            ComGuard
+        }
+    }
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize(); }
+        }
+    }
 
+    let _com_guard = ComGuard::new();
+
+    unsafe {
         let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
             .map_err(|e| CoreError::com("create IShellLink", format!("{}", e)))?;
 
@@ -166,8 +182,6 @@ pub fn create_lnk(
         persist
             .Save(PCWSTR(lnk_wide.as_ptr()), true)
             .map_err(|e| CoreError::com("save shortcut", format!("{}", e)))?;
-
-        CoUninitialize();
     }
 
     debug!("Shortcut created: {} -> {}", lnk_path.display(), target.display());

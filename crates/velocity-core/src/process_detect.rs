@@ -9,14 +9,31 @@ use std::path::Path;
 /// Check if a process with the given name is currently running.
 ///
 /// `process_name` should be just the filename (e.g., "myapp.exe").
+/// Uses exact name matching to avoid false positives from partial matches.
 pub fn is_process_running(process_name: &str) -> Result<bool> {
+    let filter = format!("IMAGENAME eq {}", process_name);
     let output = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {}", process_name), "/NH"])
+        .args(["/FI", &filter, "/NH", "/FO", "CSV"])
         .output()
         .map_err(|e| CoreError::Other(format!("Failed to run tasklist: {}", e)))?;
     
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains(process_name))
+    // With CSV output and exact IMAGENAME filter, check if any line contains
+    // the exact process name as a quoted CSV field
+    let name_lower = process_name.to_lowercase();
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // CSV format: "name.exe","pid","session","session#","mem"
+        if let Some(first_field) = line.split(',').next() {
+            let name = first_field.trim_matches('"').to_lowercase();
+            if name == name_lower {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Check if the application's main executable is running.

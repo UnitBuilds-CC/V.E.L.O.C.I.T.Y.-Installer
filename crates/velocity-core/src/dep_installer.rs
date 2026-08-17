@@ -389,8 +389,8 @@ fn is_acceptable_exit_code(code: i32) -> bool {
         0    // Success
         | 3010 // MSI: success, reboot required
         | 1641 // MSI: success, reboot initiated
-        | 1603 // MSI: fatal error (some installers use this for "already installed")
-        | 1605 // MSI: product not installed (uninstall)
+        | 1605 // MSI: product not installed (uninstall context)
+        | 1638 // MSI: product is already installed
         | 1   // Generic "already installed" for some NSIS installers
     )
 }
@@ -464,7 +464,9 @@ mod tests {
         assert!(is_acceptable_exit_code(0));
         assert!(is_acceptable_exit_code(3010));
         assert!(is_acceptable_exit_code(1641));
+        assert!(is_acceptable_exit_code(1638)); // Already installed
         assert!(!is_acceptable_exit_code(1602)); // User cancelled
+        assert!(!is_acceptable_exit_code(1603)); // MSI fatal error
         assert!(!is_acceptable_exit_code(9999)); // Random failure
     }
 

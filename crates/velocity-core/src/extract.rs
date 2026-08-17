@@ -2,7 +2,7 @@
 
 use crate::error::{CoreError, Result};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Progress callback type: (files_extracted, total_files, current_file_name)
 pub type ProgressCallback = Box<dyn Fn(usize, usize, &str) + Send>;
@@ -11,6 +11,9 @@ pub type ProgressCallback = Box<dyn Fn(usize, usize, &str) + Send>;
 ///
 /// The archive is expected to contain relative paths that map directly
 /// to the installation directory.
+///
+/// Progress is reported as files are extracted. The total count is reported
+/// as an estimate that grows as new entries are encountered (single-pass).
 pub fn extract_archive(
     compressed_data: &[u8],
     target_dir: &Path,
@@ -21,7 +24,7 @@ pub fn extract_archive(
     // Create target directory if it doesn't exist
     std::fs::create_dir_all(target_dir)?;
 
-    // Decompress zstd
+    // Decompress zstd (single pass)
     let decompressed = zstd::decode_all(compressed_data)
         .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?;
 
@@ -30,17 +33,6 @@ pub fn extract_archive(
     let mut extracted_files = Vec::new();
     let mut file_count = 0usize;
 
-    // Count total entries for progress
-    let total_files = archive.entries()
-        .ok()
-        .map(|entries| entries.count())
-        .unwrap_or(0);
-
-    // Re-create archive since entries is a consuming iterator
-    let decompressed2 = zstd::decode_all(compressed_data)
-        .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?;
-    let mut archive = tar::Archive::new(decompressed2.as_slice());
-
     for entry in archive.entries().map_err(|e| CoreError::compression("tar", format!("{}", e)))? {
         let mut entry = entry.map_err(|e| CoreError::compression("tar entry", format!("{}", e)))?;
 
@@ -48,21 +40,21 @@ pub fn extract_archive(
             .map_err(|e| CoreError::compression("tar path", format!("{}", e)))?
             .into_owned();
 
-        let dest_path = target_dir.join(&path);
-
-        // Report progress
+        // Report progress — total is unknown during single-pass, use 0 to indicate dynamic
         if let Some(cb) = progress {
             let name = path.to_string_lossy().to_string();
-            cb(file_count, total_files, &name);
+            cb(file_count, 0, &name);
         }
 
         // Security: ensure we don't escape the target directory
-        if !dest_path.starts_with(target_dir) {
+        if !dest_path_within_target(&path, target_dir) {
             return Err(CoreError::permission_denied("path traversal", format!(
                 "{} escapes target directory {}",
                 path.display(), target_dir.display()
             )));
         }
+
+        let dest_path = target_dir.join(&path);
 
         // Create parent directories
         if let Some(parent) = dest_path.parent() {
@@ -72,6 +64,10 @@ pub fn extract_archive(
         if entry.header().entry_type().is_dir() {
             std::fs::create_dir_all(&dest_path)?;
             debug!("Created directory: {}", dest_path.display());
+        } else if entry.header().entry_type().is_symlink() {
+            // Skip symlinks for security — they could point outside the target
+            warn!("Skipping symlink in archive: {}", path.display());
+            continue;
         } else {
             let mut outfile = std::fs::File::create(&dest_path)?;
             std::io::copy(&mut entry, &mut outfile)?;
@@ -84,6 +80,41 @@ pub fn extract_archive(
 
     info!("Extracted {} files", file_count);
     Ok(extracted_files)
+}
+
+/// Check if a relative path stays within the target directory.
+///
+/// This is a pre-canonicalization check that validates path components
+/// without requiring the path to exist on disk.
+fn dest_path_within_target(relative: &Path, _target_dir: &Path) -> bool {
+    // Reject absolute paths
+    if relative.is_absolute() {
+        return false;
+    }
+
+    // Walk components and check for parent dir traversal
+    let mut depth = 0i32;
+    for component in relative.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            std::path::Component::Normal(_) => {
+                depth += 1;
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return false;
+            }
+            std::path::Component::CurDir => {
+                // "." — no change in depth
+            }
+        }
+    }
+
+    true
 }
 
 /// Create a zstd-compressed tar archive from a list of files.

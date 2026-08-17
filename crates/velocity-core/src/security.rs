@@ -49,11 +49,40 @@ pub fn cleanup_temp_dir(path: &Path) {
 /// Validate that a destination path does not escape the target directory.
 ///
 /// This prevents path traversal attacks (e.g., `../../etc/passwd` in a tar archive).
-/// Returns an error if the path escapes the target.
+/// Returns an error if the path escapes the target or if paths cannot be resolved.
 pub fn validate_path_within_target(dest_path: &Path, target_dir: &Path) -> Result<()> {
-    // Canonicalize both paths for comparison
-    let canonical_target = target_dir.canonicalize().unwrap_or_else(|_| target_dir.to_path_buf());
-    let canonical_dest = dest_path.canonicalize().unwrap_or_else(|_| dest_path.to_path_buf());
+    // Canonicalize both paths for comparison.
+    // If canonicalize fails (e.g., path doesn't exist yet), we must NOT fall back
+    // to uncanonicalized paths — that would bypass the traversal check.
+    let canonical_target = target_dir.canonicalize().map_err(|e| {
+        CoreError::permission_denied("path validation", format!(
+            "Cannot resolve target directory {}: {}", target_dir.display(), e
+        ))
+    })?;
+
+    // For the destination, if it doesn't exist yet, canonicalize the parent
+    // and append the filename to get a reliable path.
+    let canonical_dest = if dest_path.exists() {
+        dest_path.canonicalize().map_err(|e| {
+            CoreError::permission_denied("path validation", format!(
+                "Cannot resolve destination path {}: {}", dest_path.display(), e
+            ))
+        })?
+    } else {
+        // Parent must exist and be resolvable
+        let parent = dest_path.parent().unwrap_or(dest_path);
+        let file_name = dest_path.file_name().ok_or_else(|| {
+            CoreError::permission_denied("path validation", format!(
+                "Invalid destination path: {}", dest_path.display()
+            ))
+        })?;
+        let canonical_parent = parent.canonicalize().map_err(|e| {
+            CoreError::permission_denied("path validation", format!(
+                "Cannot resolve parent directory {}: {}", parent.display(), e
+            ))
+        })?;
+        canonical_parent.join(file_name)
+    };
 
     if !canonical_dest.starts_with(&canonical_target) {
         return Err(CoreError::permission_denied("path traversal", format!(
@@ -201,15 +230,74 @@ fn sanitize_component(name: &str) -> String {
 }
 
 /// Restrict directory ACLs to current user + administrators (Windows only).
+///
+/// Uses `icacls` to set a restrictive DACL that grants Full Control only to:
+/// - The current user (owner)
+/// - The Administrators group
+/// All other inherited permissions are removed.
 #[cfg(target_os = "windows")]
 fn restrict_directory_acl(path: &Path) -> Result<()> {
-    // On Windows, the default ACL for directories created in %TEMP%
-    // already restricts access to the creating user and administrators.
-    // For additional hardening, we verify the directory is not world-accessible.
-    // Full ACL manipulation would require the windows-acl crate or manual
-    // SECURITY_DESCRIPTOR construction, which is deferred to a future release.
-    debug!("Secure temp dir created at: {}", path.display());
+    let path_str = path.to_string_lossy();
+
+    // Remove inherited permissions
+    let remove_result = std::process::Command::new("icacls")
+        .args([&path_str, "/inheritance:r"])
+        .output()
+        .map_err(|e| CoreError::other("ACL", format!("Failed to run icacls: {}", e)))?;
+
+    if !remove_result.status.success() {
+        let stderr = String::from_utf8_lossy(&remove_result.stderr);
+        return Err(CoreError::other("ACL", format!(
+            "icacls /inheritance:r failed: {}", stderr
+        )));
+    }
+
+    // Grant Full Control to current user
+    let user_grant = format!("*{}:(OI)(CI)F", whoami());
+    let grant_user = std::process::Command::new("icacls")
+        .args([&path_str, "/grant:r", &user_grant])
+        .output()
+        .map_err(|e| CoreError::other("ACL", format!("Failed to run icacls: {}", e)))?;
+
+    if !grant_user.status.success() {
+        let stderr = String::from_utf8_lossy(&grant_user.stderr);
+        return Err(CoreError::other("ACL", format!(
+            "icacls grant user failed: {}", stderr
+        )));
+    }
+
+    // Grant Full Control to Administrators group
+    let grant_admin = std::process::Command::new("icacls")
+        .args([&path_str, "/grant", "*S-1-5-32-544:(OI)(CI)F"])
+        .output()
+        .map_err(|e| CoreError::other("ACL", format!("Failed to run icacls: {}", e)))?;
+
+    if !grant_admin.status.success() {
+        let stderr = String::from_utf8_lossy(&grant_admin.stderr);
+        return Err(CoreError::other("ACL", format!(
+            "icacls grant admin failed: {}", stderr
+        )));
+    }
+
+    debug!("Restricted ACLs for: {}", path.display());
     Ok(())
+}
+
+/// Get the current user's SID string (for icacls).
+#[cfg(target_os = "windows")]
+fn whoami() -> String {
+    std::process::Command::new("whoami")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // CSV format: "username","SID"
+            stdout.lines().next()
+                .and_then(|line| line.split(',').nth(1))
+                .map(|s| s.trim_matches('"').to_string())
+        })
+        .unwrap_or_else(|| "BUILTIN\\Users".to_string())
 }
 
 #[cfg(test)]
