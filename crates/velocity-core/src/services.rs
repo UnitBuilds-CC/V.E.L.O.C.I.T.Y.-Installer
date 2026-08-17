@@ -51,11 +51,11 @@ fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<
     }
 
     let output = cmd.output()
-        .map_err(|e| CoreError::Other(format!("Failed to run sc create: {}", e)))?;
+        .map_err(|e| CoreError::other("sc create", format!("{}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CoreError::Other(format!(
+        return Err(CoreError::other("install service", format!(
             "Failed to install service '{}': {}",
             svc.name, stderr
         )));
@@ -83,7 +83,7 @@ pub fn start_service(name: &str) -> Result<()> {
     let output = std::process::Command::new("sc")
         .args(["start", name])
         .output()
-        .map_err(|e| CoreError::Other(format!("Failed to start service: {}", e)))?;
+        .map_err(|e| CoreError::other("start service", format!("{}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -118,11 +118,11 @@ fn remove_service(name: &str) -> Result<()> {
     let output = std::process::Command::new("sc")
         .args(["delete", name])
         .output()
-        .map_err(|e| CoreError::Other(format!("Failed to delete service: {}", e)))?;
+        .map_err(|e| CoreError::other("delete service", format!("{}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CoreError::Other(format!(
+        return Err(CoreError::other("remove service", format!(
             "Failed to remove service '{}': {}",
             name, stderr
         )));

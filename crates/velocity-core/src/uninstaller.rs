@@ -46,7 +46,7 @@ pub fn generate_uninstaller_with_info(
     info!("Generating uninstaller at: {}", output_path.display());
 
     let uninstall_json = serde_json::to_vec(uninstall_info)
-        .map_err(|e| CoreError::Other(format!("Failed to serialize uninstall info: {}", e)))?;
+        .map_err(|e| CoreError::other("serialize uninstall", format!("{}", e)))?;
 
     // The uninstaller is the runtime exe + uninstall marker + uninstall data
     let mut output = Vec::new();

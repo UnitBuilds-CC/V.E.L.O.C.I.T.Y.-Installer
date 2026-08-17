@@ -21,21 +21,21 @@ pub fn apply_registry_entry(entry: &RegistryEntry) -> Result<()> {
 
     let (key, _) = root_key
         .create_subkey(&entry.key)
-        .map_err(|e| CoreError::Registry(format!("Failed to create key '{}': {}", entry.key, e)))?;
+        .map_err(|e| CoreError::registry("create registry key", format!("Failed to create key '{}': {}", entry.key, e)))?;
 
     let value_name = entry.name.as_deref().unwrap_or("");
 
     match entry.value_type.as_str() {
         "string" | "REG_SZ" => {
             key.set_value(value_name, &entry.value)
-                .map_err(|e| CoreError::Registry(format!("Failed to set string value: {}", e)))?;
+                .map_err(|e| CoreError::registry("set string value", format!("{}", e)))?;
         }
         "dword" | "REG_DWORD" => {
             let val: u32 = entry.value.parse().map_err(|_| {
-                CoreError::Registry(format!("Invalid DWORD value: '{}'", entry.value))
+                CoreError::registry("parse DWORD", format!("Invalid DWORD value: '{}'", entry.value))
             })?;
             key.set_value(value_name, &val)
-                .map_err(|e| CoreError::Registry(format!("Failed to set DWORD value: {}", e)))?;
+                .map_err(|e| CoreError::registry("set DWORD value", format!("{}", e)))?;
         }
         "expand_string" | "REG_EXPAND_SZ" => {
             use winreg::RegValue;
@@ -46,17 +46,17 @@ pub fn apply_registry_entry(entry: &RegistryEntry) -> Result<()> {
                 bytes,
             };
             key.set_raw_value(value_name, &reg_value)
-                .map_err(|e| CoreError::Registry(format!("Failed to set expand string value: {}", e)))?;
+                .map_err(|e| CoreError::registry("set expand string", format!("{}", e)))?;
         }
         "multi_string" | "REG_MULTI_SZ" => {
             let values: Vec<&str> = entry.value.split('\n').collect();
             key.set_value(value_name, &values)
-                .map_err(|e| CoreError::Registry(format!("Failed to set multi-string value: {}", e)))?;
+                .map_err(|e| CoreError::registry("set multi-string", format!("{}", e)))?;
         }
         _ => {
             // Default to string
             key.set_value(value_name, &entry.value)
-                .map_err(|e| CoreError::Registry(format!("Failed to set value: {}", e)))?;
+                .map_err(|e| CoreError::registry("set value", format!("{}", e)))?;
         }
     }
 
@@ -82,15 +82,15 @@ fn remove_registry_entry(entry: &RegistryEntry) -> Result<()> {
         // Remove a specific value
         let key = root_key
             .open_subkey(&entry.key)
-            .map_err(|e| CoreError::Registry(format!("Failed to open key '{}': {}", entry.key, e)))?;
+            .map_err(|e| CoreError::registry("open registry key", format!("Failed to open key '{}': {}", entry.key, e)))?;
         key.delete_value(name.as_str())
-            .map_err(|e| CoreError::Registry(format!("Failed to delete value '{}': {}", name, e)))?;
+            .map_err(|e| CoreError::registry("delete value", format!("Failed to delete value '{}': {}", name, e)))?;
         debug!("Deleted registry value: {}\\{}\\{}", entry.root, entry.key, name);
     } else {
         // Remove the entire key
         root_key
             .delete_subkey_all(&entry.key)
-            .map_err(|e| CoreError::Registry(format!("Failed to delete key '{}': {}", entry.key, e)))?;
+            .map_err(|e| CoreError::registry("delete key", format!("Failed to delete key '{}': {}", entry.key, e)))?;
         debug!("Deleted registry key: {}\\{}", entry.root, entry.key);
     }
 
@@ -117,47 +117,47 @@ pub fn write_uninstall_entry(
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let (key, _) = hklm
         .create_subkey(&uninstall_key)
-        .map_err(|e| CoreError::Registry(format!("Failed to create uninstall key: {}", e)))?;
+        .map_err(|e| CoreError::registry("create uninstall key", format!("{}", e)))?;
 
     let name = display_name.unwrap_or(app_name);
 
     key.set_value("DisplayName", &name)
-        .map_err(|e| CoreError::Registry(format!("Failed to set DisplayName: {}", e)))?;
+        .map_err(|e| CoreError::registry("set DisplayName", format!("{}", e)))?;
     key.set_value("DisplayVersion", &version)
-        .map_err(|e| CoreError::Registry(format!("Failed to set DisplayVersion: {}", e)))?;
+        .map_err(|e| CoreError::registry("set DisplayVersion", format!("{}", e)))?;
     key.set_value("Publisher", &publisher)
-        .map_err(|e| CoreError::Registry(format!("Failed to set Publisher: {}", e)))?;
+        .map_err(|e| CoreError::registry("set Publisher", format!("{}", e)))?;
     key.set_value("InstallLocation", &install_dir)
-        .map_err(|e| CoreError::Registry(format!("Failed to set InstallLocation: {}", e)))?;
+        .map_err(|e| CoreError::registry("set InstallLocation", format!("{}", e)))?;
     key.set_value("UninstallString", &format!("\"{}\"", uninstaller_path))
-        .map_err(|e| CoreError::Registry(format!("Failed to set UninstallString: {}", e)))?;
+        .map_err(|e| CoreError::registry("set UninstallString", format!("{}", e)))?;
     key.set_value("QuietUninstallString", &format!("\"{}\" /quiet", uninstaller_path))
-        .map_err(|e| CoreError::Registry(format!("Failed to set QuietUninstallString: {}", e)))?;
+        .map_err(|e| CoreError::registry("set QuietUninstallString", format!("{}", e)))?;
 
     // NoModify and NoRepair = 1 (hide modify/repair buttons)
     key.set_value("NoModify", &1u32)
-        .map_err(|e| CoreError::Registry(format!("Failed to set NoModify: {}", e)))?;
+        .map_err(|e| CoreError::registry("set NoModify", format!("{}", e)))?;
     key.set_value("NoRepair", &1u32)
-        .map_err(|e| CoreError::Registry(format!("Failed to set NoRepair: {}", e)))?;
+        .map_err(|e| CoreError::registry("set NoRepair", format!("{}", e)))?;
 
     if let Some(icon) = icon_path {
         key.set_value("DisplayIcon", &icon)
-            .map_err(|e| CoreError::Registry(format!("Failed to set DisplayIcon: {}", e)))?;
+            .map_err(|e| CoreError::registry("set DisplayIcon", format!("{}", e)))?;
     }
 
     // Optional URLs
     if let Some(url) = help_url {
         key.set_value("HelpLink", &url)
-            .map_err(|e| CoreError::Registry(format!("Failed to set HelpLink: {}", e)))?;
+            .map_err(|e| CoreError::registry("set HelpLink", format!("{}", e)))?;
     }
     if let Some(url) = update_url {
         key.set_value("URLUpdateInfo", &url)
-            .map_err(|e| CoreError::Registry(format!("Failed to set URLUpdateInfo: {}", e)))?;
+            .map_err(|e| CoreError::registry("set URLUpdateInfo", format!("{}", e)))?;
     }
 
     // Estimated size (in KB) — default 10MB if unknown
     key.set_value("EstimatedSize", &10240u32)
-        .map_err(|e| CoreError::Registry(format!("Failed to set EstimatedSize: {}", e)))?;
+        .map_err(|e| CoreError::registry("set EstimatedSize", format!("{}", e)))?;
 
     // InstallDate as YYYYMMDD string
     let now = std::time::SystemTime::now()
@@ -167,7 +167,7 @@ pub fn write_uninstall_entry(
     let (year, month, day) = days_to_ymd(days as i64);
     let date_str = format!("{:04}{:02}{:02}", year, month, day);
     key.set_value("InstallDate", &date_str)
-        .map_err(|e| CoreError::Registry(format!("Failed to set InstallDate: {}", e)))?;
+        .map_err(|e| CoreError::registry("set InstallDate", format!("{}", e)))?;
 
     info!("Uninstall entry registered for: {}", name);
     Ok(())
@@ -183,7 +183,7 @@ pub fn remove_uninstall_entry(app_name: &str) -> Result<()> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     hklm
         .delete_subkey_all(&uninstall_key)
-        .map_err(|e| CoreError::Registry(format!("Failed to remove uninstall entry: {}", e)))?;
+        .map_err(|e| CoreError::registry("remove uninstall entry", format!("{}", e)))?;
 
     info!("Uninstall entry removed for: {}", app_name);
     Ok(())
@@ -196,7 +196,7 @@ fn get_root_key(root: &str) -> Result<RegKey> {
         "HKCU" => Ok(RegKey::predef(HKEY_CURRENT_USER)),
         "HKCR" => Ok(RegKey::predef(HKEY_CLASSES_ROOT)),
         "HKU" => Ok(RegKey::predef(HKEY_USERS)),
-        _ => Err(CoreError::Registry(format!("Unknown registry root: {}", root))),
+        _ => Err(CoreError::registry("unknown root", format!("Unknown registry root: {}", root))),
     }
 }
 

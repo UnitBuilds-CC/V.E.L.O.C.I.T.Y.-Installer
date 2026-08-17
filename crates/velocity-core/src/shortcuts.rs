@@ -103,7 +103,7 @@ pub fn create_lnk(
         let _ = CoInitialize(None).ok();
 
         let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| CoreError::Com(format!("Failed to create IShellLink: {}", e)))?;
+            .map_err(|e| CoreError::com("create IShellLink", format!("{}", e)))?;
 
         // Set the target path
         let target_wide: Vec<u16> = target
@@ -113,7 +113,7 @@ pub fn create_lnk(
             .collect();
         shell_link
             .SetPath(PCWSTR(target_wide.as_ptr()))
-            .map_err(|e| CoreError::Com(format!("Failed to set shortcut path: {}", e)))?;
+            .map_err(|e| CoreError::com("set shortcut path", format!("{}", e)))?;
 
         // Set working directory
         let dir_wide: Vec<u16> = working_dir
@@ -123,14 +123,14 @@ pub fn create_lnk(
             .collect();
         shell_link
             .SetWorkingDirectory(PCWSTR(dir_wide.as_ptr()))
-            .map_err(|e| CoreError::Com(format!("Failed to set working directory: {}", e)))?;
+            .map_err(|e| CoreError::com("set working directory", format!("{}", e)))?;
 
         // Set description
         if let Some(desc) = description {
             let desc_wide: Vec<u16> = desc.encode_utf16().chain(std::iter::once(0)).collect();
             shell_link
                 .SetDescription(PCWSTR(desc_wide.as_ptr()))
-                .map_err(|e| CoreError::Com(format!("Failed to set description: {}", e)))?;
+                .map_err(|e| CoreError::com("set description", format!("{}", e)))?;
         }
 
         // Set arguments
@@ -138,7 +138,7 @@ pub fn create_lnk(
             let args_wide: Vec<u16> = args.encode_utf16().chain(std::iter::once(0)).collect();
             shell_link
                 .SetArguments(PCWSTR(args_wide.as_ptr()))
-                .map_err(|e| CoreError::Com(format!("Failed to set arguments: {}", e)))?;
+                .map_err(|e| CoreError::com("set arguments", format!("{}", e)))?;
         }
 
         // Set icon
@@ -150,13 +150,13 @@ pub fn create_lnk(
                 .collect();
             shell_link
                 .SetIconLocation(PCWSTR(icon_wide.as_ptr()), 0)
-                .map_err(|e| CoreError::Com(format!("Failed to set icon: {}", e)))?;
+                .map_err(|e| CoreError::com("set icon", format!("{}", e)))?;
         }
 
         // Save the shortcut via IPersistFile
         let persist: IPersistFile = shell_link
             .cast()
-            .map_err(|e| CoreError::Com(format!("Failed to get IPersistFile: {}", e)))?;
+            .map_err(|e| CoreError::com("get IPersistFile", format!("{}", e)))?;
 
         let lnk_wide: Vec<u16> = lnk_path
             .as_os_str()
@@ -165,7 +165,7 @@ pub fn create_lnk(
             .collect();
         persist
             .Save(PCWSTR(lnk_wide.as_ptr()), true)
-            .map_err(|e| CoreError::Com(format!("Failed to save shortcut: {}", e)))?;
+            .map_err(|e| CoreError::com("save shortcut", format!("{}", e)))?;
 
         CoUninitialize();
     }
@@ -225,7 +225,7 @@ fn get_known_folder_path(folder: KnownFolder) -> Result<PathBuf> {
 
     unsafe {
         let path_ptr = SHGetKnownFolderPath(folder_id, KNOWN_FOLDER_FLAG(0), None)
-            .map_err(|e| CoreError::Com(format!("SHGetKnownFolderPath failed: {}", e)))?;
+            .map_err(|e| CoreError::com("SHGetKnownFolderPath", format!("{}", e)))?;
 
         // Convert PWSTR to String
         let mut len = 0usize;
@@ -236,7 +236,7 @@ fn get_known_folder_path(folder: KnownFolder) -> Result<PathBuf> {
         }
         let slice = std::slice::from_raw_parts(path_ptr.0, len);
         let path_str = String::from_utf16(slice)
-            .map_err(|e| CoreError::Com(format!("Invalid UTF-16 path: {}", e)))?;
+            .map_err(|e| CoreError::com("UTF-16 conversion", format!("Invalid UTF-16 path: {}", e)))?;
         let path = PathBuf::from(&path_str);
         CoTaskMemFree(Some(path_ptr.0 as *mut _));
         Ok(path)

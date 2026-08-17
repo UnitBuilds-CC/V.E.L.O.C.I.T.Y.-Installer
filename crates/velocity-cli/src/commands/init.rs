@@ -150,6 +150,8 @@ fn create_default_manifest(name: &str) -> velocity_config::VelocityManifest {
         file_associations: Vec::new(),
         dependencies: Vec::new(),
         bundled_apps: Vec::new(),
+        components: Vec::new(),
+        localization: velocity_config::LocalizationConfig::default(),
     }
 }
 

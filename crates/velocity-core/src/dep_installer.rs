@@ -301,14 +301,14 @@ fn execute_installer_with_workdir(
                     debug!("Installer exited with code {} (acceptable)", code);
                     Ok(())
                 } else {
-                    Err(CoreError::Other(format!(
+                    Err(CoreError::other("installer execution", format!(
                         "Installer exited with code {}",
                         code
                     )))
                 }
             }
         }
-        Err(e) => Err(CoreError::Other(format!(
+        Err(e) => Err(CoreError::other("installer execution", format!(
             "Failed to execute installer: {}",
             e
         ))),

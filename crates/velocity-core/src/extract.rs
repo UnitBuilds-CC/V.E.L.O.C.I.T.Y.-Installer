@@ -23,7 +23,7 @@ pub fn extract_archive(
 
     // Decompress zstd
     let decompressed = zstd::decode_all(compressed_data)
-        .map_err(|e| CoreError::Compression(format!("zstd decompression failed: {}", e)))?;
+        .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?;
 
     // Parse tar archive
     let mut archive = tar::Archive::new(decompressed.as_slice());
@@ -32,19 +32,20 @@ pub fn extract_archive(
 
     // Count total entries for progress
     let total_files = archive.entries()
-        .map(|e| e.count())
+        .ok()
+        .map(|entries| entries.count())
         .unwrap_or(0);
 
     // Re-create archive since entries is a consuming iterator
     let decompressed2 = zstd::decode_all(compressed_data)
-        .map_err(|e| CoreError::Compression(format!("zstd decompression failed: {}", e)))?;
+        .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?;
     let mut archive = tar::Archive::new(decompressed2.as_slice());
 
-    for entry in archive.entries().map_err(|e| CoreError::Compression(format!("tar error: {}", e)))? {
-        let mut entry = entry.map_err(|e| CoreError::Compression(format!("tar entry error: {}", e)))?;
+    for entry in archive.entries().map_err(|e| CoreError::compression("tar", format!("{}", e)))? {
+        let mut entry = entry.map_err(|e| CoreError::compression("tar entry", format!("{}", e)))?;
 
         let path = entry.path()
-            .map_err(|e| CoreError::Compression(format!("tar path error: {}", e)))?
+            .map_err(|e| CoreError::compression("tar path", format!("{}", e)))?
             .into_owned();
 
         let dest_path = target_dir.join(&path);
@@ -57,9 +58,9 @@ pub fn extract_archive(
 
         // Security: ensure we don't escape the target directory
         if !dest_path.starts_with(target_dir) {
-            return Err(CoreError::Compression(format!(
-                "Path traversal detected: {}",
-                path.display()
+            return Err(CoreError::permission_denied("path traversal", format!(
+                "{} escapes target directory {}",
+                path.display(), target_dir.display()
             )));
         }
 
@@ -101,17 +102,17 @@ pub fn create_archive(
         let mut file = std::fs::File::open(abs_path)?;
         tar_builder
             .append_file(rel_name, &mut file)
-            .map_err(|e| CoreError::Compression(format!("tar append error: {}", e)))?;
+            .map_err(|e| CoreError::compression("tar append", format!("{}", e)))?;
         debug!("Added to archive: {} -> {}", abs_path.display(), rel_name);
     }
 
     let tar_data = tar_builder
         .into_inner()
-        .map_err(|e| CoreError::Compression(format!("tar finish error: {}", e)))?;
+        .map_err(|e| CoreError::compression("tar finalize", format!("{}", e)))?;
 
     // Compress with zstd
     let compressed = zstd::encode_all(tar_data.as_slice(), compression_level)
-        .map_err(|e| CoreError::Compression(format!("zstd compression failed: {}", e)))?;
+        .map_err(|e| CoreError::compression("zstd compression", format!("{}", e)))?;
 
     info!("Archive size: {} bytes (from {} bytes)", compressed.len(), tar_data.len());
     Ok(compressed)

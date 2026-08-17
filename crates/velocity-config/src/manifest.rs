@@ -46,6 +46,12 @@ pub struct VelocityManifest {
     /// Third-party applications bundled with the installer
     #[serde(default)]
     pub bundled_apps: Vec<BundledAppEntry>,
+    /// Installable components (user-selectable features)
+    #[serde(default)]
+    pub components: Vec<Component>,
+    /// Localization / internationalization settings
+    #[serde(default)]
+    pub localization: LocalizationConfig,
 }
 
 /// Application metadata.
@@ -474,6 +480,87 @@ pub struct BundledAppEntry {
     pub working_dir: Option<String>,
 }
 
+/// Installable component for user-selectable feature installation.
+///
+/// Components allow users to choose which parts of the application to install.
+/// Each component can have its own files, registry entries, shortcuts, etc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Component {
+    /// Unique component identifier (e.g., "core", "docs", "sdk")
+    pub id: String,
+    /// Display name shown to the user
+    pub name: String,
+    /// Description shown in the component selection UI
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether this component is selected by default
+    #[serde(default = "default_true")]
+    pub selected_by_default: bool,
+    /// Whether this component is mandatory (cannot be deselected)
+    #[serde(default)]
+    pub mandatory: bool,
+    /// Disk space required by this component (bytes, estimated)
+    #[serde(default)]
+    pub size: u64,
+    /// Group name for organizing components in the UI
+    #[serde(default)]
+    pub group: Option<String>,
+    /// File patterns specific to this component (relative to base source)
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// Subdirectory within the install dir for this component's files
+    #[serde(default)]
+    pub install_subdir: Option<String>,
+    /// Registry entries specific to this component
+    #[serde(default)]
+    pub registry: Vec<RegistryEntry>,
+    /// Shortcuts specific to this component
+    #[serde(default)]
+    pub shortcuts: Vec<CustomShortcut>,
+    /// Child components (for tree-based selection UI)
+    #[serde(default)]
+    pub children: Vec<Component>,
+    /// Dependencies on other component IDs (must be installed if those are)
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+/// Localization configuration for multi-language installer UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalizationConfig {
+    /// Default language code (e.g., "en", "de", "fr", "ja")
+    #[serde(default = "default_language")]
+    pub default_language: String,
+    /// Available languages with their display names
+    #[serde(default)]
+    pub languages: Vec<LanguageEntry>,
+    /// Custom string overrides for the default language
+    #[serde(default)]
+    pub strings: HashMap<String, String>,
+}
+
+impl Default for LocalizationConfig {
+    fn default() -> Self {
+        Self {
+            default_language: default_language(),
+            languages: Vec::new(),
+            strings: HashMap::new(),
+        }
+    }
+}
+
+/// A language entry for multi-language support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanguageEntry {
+    /// Language code (e.g., "en", "de", "fr")
+    pub code: String,
+    /// Display name (e.g., "English", "Deutsch", "Francais")
+    pub name: String,
+    /// Localized UI strings for this language
+    #[serde(default)]
+    pub strings: HashMap<String, String>,
+}
+
 // ─── Default value functions ─────────────────────────────────────────────────
 
 fn default_install_dir() -> String {
@@ -542,4 +629,8 @@ fn default_bundled_priority() -> u32 {
 
 fn default_dep_type() -> String {
     "exe".to_string()
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }

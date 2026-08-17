@@ -22,6 +22,8 @@ pub mod pe_icon;
 pub mod downloader;
 pub mod dep_resolver;
 pub mod dep_installer;
+pub mod localization;
+pub mod security;
 pub mod error;
 
 pub use error::*;

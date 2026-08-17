@@ -207,3 +207,79 @@ fn build_runtime(project_dir: &Path) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_options_default() {
+        let opts = BuildOptions::default();
+        assert_eq!(opts.compression_level, 3);
+        assert!(!opts.quiet);
+        assert!(opts.runtime_path.is_none());
+    }
+
+    #[test]
+    fn test_manifest_parsing_for_build() {
+        // Verify that a manifest can be parsed and has expected structure
+        let toml_str = r#"
+[app]
+name = "Test App"
+version = "1.0.0"
+publisher = "Test"
+
+[install]
+default_dir = "{autopf}\\Test App"
+
+[files]
+source = ["bin/**/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[ui]
+theme = "classic"
+"#;
+        let manifest: velocity_config::VelocityManifest =
+            velocity_config::parse_manifest_str(toml_str).unwrap();
+        assert_eq!(manifest.app.name, "Test App");
+        assert_eq!(manifest.files.source.len(), 1);
+        assert_eq!(manifest.ui.theme, "classic");
+    }
+
+    #[test]
+    fn test_compression_roundtrip() {
+        use velocity_core::extract;
+
+        let temp_dir = std::env::temp_dir().join("velocity_compress_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create test files
+        std::fs::write(temp_dir.join("test.txt"), "Hello Velocity Installer!").unwrap();
+        std::fs::write(temp_dir.join("data.bin"), vec![0u8, 1, 2, 3, 4, 5]).unwrap();
+
+        let files = vec![
+            (temp_dir.join("test.txt"), "test.txt".to_string()),
+            (temp_dir.join("data.bin"), "data.bin".to_string()),
+        ];
+
+        // Create archive with various compression levels
+        for level in [1, 3, 10, 19] {
+            let archive = extract::create_archive(&files, level).unwrap();
+            assert!(!archive.is_empty(), "Archive should not be empty at level {}", level);
+
+            // Extract and verify
+            let extract_dir = temp_dir.join(format!("extract_l{}", level));
+            let extracted = extract::extract_archive(&archive, &extract_dir, None).unwrap();
+            assert_eq!(extracted.len(), 2);
+
+            let content = std::fs::read_to_string(extract_dir.join("test.txt")).unwrap();
+            assert_eq!(content, "Hello Velocity Installer!");
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}

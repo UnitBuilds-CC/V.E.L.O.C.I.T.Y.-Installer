@@ -17,7 +17,7 @@ static LOGGER: Mutex<Option<InstallLogger>> = Mutex::new(None);
 pub fn init_logger(log_dir: &Path, app_name: &str) -> Result<PathBuf> {
     let log_path = log_dir.join(format!("{}_install.log", sanitize_filename(app_name)));
     let logger = InstallLogger::new(&log_path)?;
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::Other(format!("Logger lock: {}", e)))?;
+    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     *guard = Some(logger);
     Ok(log_path)
 }
@@ -26,7 +26,7 @@ pub fn init_logger(log_dir: &Path, app_name: &str) -> Result<PathBuf> {
 pub fn init_temp_logger(app_name: &str) -> Result<PathBuf> {
     let log_path = std::env::temp_dir().join(format!("{}_install.log", sanitize_filename(app_name)));
     let logger = InstallLogger::new(&log_path)?;
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::Other(format!("Logger lock: {}", e)))?;
+    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     *guard = Some(logger);
     Ok(log_path)
 }
@@ -42,7 +42,7 @@ pub fn move_log_to_install_dir(install_dir: &Path, app_name: &str) -> Result<Pat
     }
     
     // Update the logger to point to the new location
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::Other(format!("Logger lock: {}", e)))?;
+    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     if let Some(ref mut logger) = *guard {
         logger.file = OpenOptions::new()
             .create(true)

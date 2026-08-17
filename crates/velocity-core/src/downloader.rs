@@ -44,14 +44,14 @@ pub fn download_file(
     let output_path = output_dir.join(&fname);
 
     // Download using WinHTTP
-    let data = download_with_winhttp(url, progress)?;
+    let data = download_with_winhttp(url, None, progress)?;
 
     // Verify SHA256 if provided
     if let Some(expected) = expected_sha256 {
         let actual = compute_sha256(&data);
         let expected_lower = expected.to_lowercase();
         if actual != expected_lower {
-            return Err(CoreError::Other(format!(
+            return Err(CoreError::other("SHA256 verification", format!(
                 "SHA256 mismatch for {}: expected {}, got {}",
                 fname, expected_lower, actual
             )));
@@ -67,9 +67,89 @@ pub fn download_file(
     Ok(output_path)
 }
 
+/// Download a file with resume support.
+///
+/// If a partial download exists at the output path, attempts to resume
+/// from where it left off using HTTP Range requests.
+/// Returns the path to the downloaded file.
+pub fn download_file_resumable(
+    url: &str,
+    output_dir: &Path,
+    filename: Option<&str>,
+    expected_sha256: Option<&str>,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<PathBuf> {
+    let fname = filename
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            url.rsplit('/')
+                .next()
+                .unwrap_or("download")
+                .split('?')
+                .next()
+                .unwrap_or("download")
+                .to_string()
+        });
+
+    std::fs::create_dir_all(output_dir)?;
+    let output_path = output_dir.join(&fname);
+    let partial_path = output_dir.join(format!("{}.partial", fname));
+
+    // Check for existing partial download
+    let existing_bytes = if partial_path.exists() {
+        let meta = std::fs::metadata(&partial_path)?;
+        let size = meta.len();
+        info!("Found partial download: {} bytes", size);
+        size
+    } else {
+        0
+    };
+
+    // Download remaining data
+    let new_data = download_with_winhttp(url, if existing_bytes > 0 { Some(existing_bytes) } else { None }, progress)?;
+
+    // Append to partial file or create new
+    if existing_bytes > 0 {
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&partial_path)?;
+        file.write_all(&new_data)?;
+        // Rename partial to final
+        std::fs::rename(&partial_path, &output_path)?;
+    } else {
+        let mut file = std::fs::File::create(&output_path)?;
+        file.write_all(&new_data)?;
+    }
+
+    // Verify SHA256 if provided
+    if let Some(expected) = expected_sha256 {
+        let actual = compute_sha256_file(&output_path)?;
+        let expected_lower = expected.to_lowercase();
+        if actual != expected_lower {
+            // Delete corrupt file
+            let _ = std::fs::remove_file(&output_path);
+            return Err(CoreError::other("SHA256 verification", format!(
+                "SHA256 mismatch for {}: expected {}, got {}",
+                fname, expected_lower, actual
+            )));
+        }
+        debug!("SHA256 verified: {}", actual);
+    }
+
+    // Clean up partial file if it still exists
+    if partial_path.exists() {
+        let _ = std::fs::remove_file(&partial_path);
+    }
+
+    info!("Download complete: {}", output_path.display());
+    Ok(output_path)
+}
+
 /// Download data from a URL using WinHTTP.
+/// If `resume_from` is Some(n), sends a Range header to resume from byte n.
 fn download_with_winhttp(
     url: &str,
+    resume_from: Option<u64>,
     progress: Option<&DownloadProgressCallback>,
 ) -> Result<Vec<u8>> {
     use windows::core::*;
@@ -86,9 +166,8 @@ fn download_with_winhttp(
             0,
         );
         if session.is_null() {
-            return Err(CoreError::Other(format!(
-                "WinHttpOpen failed: {}",
-                std::io::Error::last_os_error()
+            return Err(CoreError::other("WinHttpOpen", format!(
+                "{}", std::io::Error::last_os_error()
             )));
         }
 
@@ -107,7 +186,7 @@ fn download_with_winhttp(
         );
         if connection.is_null() {
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::Other("WinHttpConnect failed".to_string()));
+            return Err(CoreError::other("WinHttpConnect", "failed to connect"));
         }
 
         // Determine flags for HTTPS
@@ -130,7 +209,7 @@ fn download_with_winhttp(
         if request.is_null() {
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::Other("WinHttpOpenRequest failed".to_string()));
+            return Err(CoreError::other("WinHttpOpenRequest", "failed to open request"));
         }
 
         // For HTTPS, ignore cert errors (can be made configurable)
@@ -147,6 +226,17 @@ fn download_with_winhttp(
             );
         }
 
+        // Add Range header for resume support
+        if let Some(offset) = resume_from {
+            let range_header: Vec<u16> = format!("Range: bytes={}-\r\n", offset).encode_utf16().collect();
+            let _ = WinHttpAddRequestHeaders(
+                request,
+                &range_header,
+                WINHTTP_ADDREQ_FLAG_ADD,
+            );
+            debug!("Resuming download from byte {}", offset);
+        }
+
         // Send request (6 args: request, headers, headers_len, optional, optional_len, context)
         let send_result = WinHttpSendRequest(
             request,
@@ -160,9 +250,8 @@ fn download_with_winhttp(
             let _ = WinHttpCloseHandle(request);
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::Other(format!(
-                "WinHttpSendRequest failed: {}",
-                std::io::Error::last_os_error()
+            return Err(CoreError::other("WinHttpSendRequest", format!(
+                "{}", std::io::Error::last_os_error()
             )));
         }
 
@@ -172,7 +261,7 @@ fn download_with_winhttp(
             let _ = WinHttpCloseHandle(request);
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::Other("WinHttpReceiveResponse failed".to_string()));
+            return Err(CoreError::other("WinHttpReceiveResponse", "failed"));
         }
 
         // Get content length
@@ -234,7 +323,7 @@ fn parse_url(url: &str) -> Result<(String, u16, String, bool)> {
     } else if url.starts_with("http://") {
         ("http://", &url[7..])
     } else {
-        return Err(CoreError::Other(format!("Unsupported URL scheme: {}", url)));
+        return Err(CoreError::other("URL parsing", format!("Unsupported URL scheme: {}", url)));
     };
 
     let is_https = scheme == "https://";
