@@ -1,0 +1,255 @@
+# Velocity Installer Repowiki Metadata
+# Generated: 2026-08-17
+
+project:
+  name: "V.E.L.O.C.I.T.Y. Installer"
+  full_name: "Versatile Engine for Low-latency Orchestration, Coordination, and Intelligent Transaction Yield — Installer"
+  description: "Free, open-source, universal Windows installer framework built in Rust. Produces standalone .exe installers from TOML configuration."
+  repository: "https://github.com/UnitBuilds-CC/V.E.L.O.C.I.T.Y.-Installer"
+  license: "MIT OR Apache-2.0"
+  rust_version: "1.75"
+  edition: "2021"
+
+crates:
+  - name: "velocity-cli"
+    path: "crates/velocity-cli"
+    binary: "velocity"
+    description: "CLI tool — scaffold, build, sign, and test installers"
+    commands:
+      - "init"
+      - "build"
+      - "detect"
+      - "check"
+      - "info"
+      - "sign"
+      - "dep list"
+      - "dep add"
+      - "dep resolve"
+      - "dep remove"
+      - "version"
+
+  - name: "velocity-core"
+    path: "crates/velocity-core"
+    description: "Core engine — file extraction, registry, shortcuts, services, encryption, rollback, security"
+    modules:
+      - "arch_detect"
+      - "checksum"
+      - "component_tree"
+      - "condition"
+      - "dep_installer"
+      - "dep_resolver"
+      - "disk_space"
+      - "downloader"
+      - "elevation"
+      - "encryption"
+      - "env_vars"
+      - "extract"
+      - "file_assoc"
+      - "installer_mutex"
+      - "localization"
+      - "logging"
+      - "payload"
+      - "pe_icon"
+      - "platform"
+      - "process_detect"
+      - "reboot"
+      - "registry"
+      - "rollback"
+      - "scripting"
+      - "security"
+      - "services"
+      - "shortcuts"
+      - "uninstaller"
+      - "updater"
+
+  - name: "velocity-config"
+    path: "crates/velocity-config"
+    description: "Configuration parser, validator, auto-generator, path variables"
+    modules:
+      - "auto_gen"
+      - "error"
+      - "manifest"
+      - "parser"
+      - "variables"
+
+  - name: "velocity-ui"
+    path: "crates/velocity-ui"
+    description: "Installer wizard UI — modern WebView2 and classic Win32 themes"
+    modules:
+      - "classic"
+      - "cross_platform"
+      - "error"
+      - "modern"
+      - "native_wizard"
+      - "progress_dialog"
+      - "wizard"
+      - "wizard_html"
+      - "wry_wizard"
+
+  - name: "velocity-compiler"
+    path: "crates/velocity-compiler"
+    description: "Compiles config+payload into standalone .exe installers"
+    modules:
+      - "builder"
+      - "error"
+
+  - name: "velocity-runtime"
+    path: "crates/velocity-runtime"
+    binary: "velocity-runtime"
+    description: "Lightweight runtime embedded in each installer .exe"
+    modules:
+      - "main"
+      - "unix"
+      - "windows"
+
+  - name: "velocity-plugin-api"
+    path: "crates/velocity-plugin-api"
+    description: "Plugin trait + WASM SDK for custom installer actions"
+    modules:
+      - "loader"
+      - "plugin"
+
+compression:
+  primary: "zstd"
+  fallback: "lzma-rs"
+  archive: "tar"
+
+security:
+  encryption: "AES-256-GCM"
+  key_derivation: "PBKDF2-HMAC-SHA256"
+  pbkdf2_iterations: 600000
+  random: "BCryptGenRandom (Windows CSPRNG)"
+  integrity: "SHA256"
+
+ui:
+  classic: "Win32 native wizard"
+  modern: "WebView2 with dark/light themes, CSS animations, JS-Rust RPC"
+  cross_platform: "wry + tao (Linux/macOS)"
+
+plugins:
+  runtime: "Wasmtime"
+  hooks:
+    - "on_load"
+    - "on_pre_install"
+    - "on_file_extracted"
+    - "on_post_install"
+    - "on_error"
+    - "on_cancel"
+    - "on_pre_uninstall"
+    - "on_post_uninstall"
+    - "on_shutdown"
+
+documentation:
+  content:
+    - "Getting Started.md"
+    - "Development Guide.md"
+    - "Architecture Overview.md"
+
+  knowledge:
+    - "TOML Configuration System.md"
+    - "WASM Plugin Architecture.md"
+    - "AES-256-GCM Encryption and Security.md"
+    - "Rollback and Error Recovery.md"
+
+build:
+  rust:
+    toolchain: "stable"
+    workspace: true
+    release_profile:
+      opt_level: "z"
+      lto: true
+      codegen_units: 1
+      strip: true
+
+  platforms:
+    - "windows-2025"
+    - "windows-2022"
+    - "ubuntu-24.04"
+    - "ubuntu-22.04"
+    - "macos-15"
+    - "macos-14"
+
+testing:
+  total_tests: 213
+  categories:
+    - name: "Config parsing and validation"
+      count: 14
+    - name: "Archive creation and extraction"
+      count: 3
+    - name: "Payload format"
+      count: 1
+    - name: "Rollback tracking"
+      count: 3
+    - name: "Disk space operations"
+      count: 2
+    - name: "Logging and date formatting"
+      count: 7
+    - name: "Downloader URL parsing and SHA256"
+      count: 5
+    - name: "Dependency condition resolution"
+      count: 9
+    - name: "Dependency installer command building"
+      count: 5
+    - name: "Security: path traversal, overwrite handling"
+      count: 8
+    - name: "Localization string resolution"
+      count: 10
+    - name: "Progress tracking and ETA"
+      count: 5
+    - name: "File association parsing"
+      count: 1
+    - name: "Process detection"
+      count: 2
+    - name: "Uninstaller generation"
+      count: 2
+    - name: "Compiler integration"
+      count: 3
+    - name: "AES-256-GCM encryption + CSPRNG"
+      count: 12
+    - name: "Self-update version parsing"
+      count: 5
+    - name: "Component tree view"
+      count: 7
+    - name: "Scripting engine"
+      count: 13
+    - name: "End-to-end integration"
+      count: 2
+    - name: "Stress testing: 1000 files, 50MB, Unicode"
+      count: 3
+    - name: "Rollback correctness including stress"
+      count: 8
+    - name: "Fuzz-like parser robustness"
+      count: 12
+    - name: "Runtime input validation"
+      count: 9
+    - name: "Modern WebView2 wizard"
+      count: 7
+    - name: "WASM plugin API + loader"
+      count: 15
+    - name: "Plugin integration tests"
+      count: 4
+
+ci:
+  provider: "GitHub Actions"
+  workflow: ".github/workflows/ci.yml"
+  jobs:
+    - "lint (clippy + fmt)"
+    - "test (all platforms)"
+    - "build release (all platforms)"
+    - "sign-windows (tagged releases)"
+    - "sign-macos (tagged releases)"
+    - "sign-linux (tagged releases)"
+
+roadmap:
+  completed:
+    - "Phase 1: Foundation — Core engine, classic UI, TOML config, compiler, runtime"
+    - "Phase 1.5: Robustness — Dependency management, localization, security hardening"
+    - "Phase 6: Hardening — AES-256-GCM, self-update, component tree, scripting"
+    - "Phase 7: Quality — Clippy cleanup, E2E tests, structured scripting"
+    - "Phase 8: Production Hardening — Stress testing, rollback, PBKDF2, CI/CD"
+    - "Phase 9: Final Fixes — CSPRNG, runtime input validation"
+    - "Phase 10: Beta Test + Ops — Sample project, code signing, crypto audit"
+    - "Phase 2: Modern UI — WebView2 wizard, themes, RPC"
+    - "Phase 3: WASM Plugins — Plugin trait, lifecycle hooks, Wasmtime loader"
+  pending:
+    - "Phase 4: Ecosystem — GUI config editor, template marketplace, delta compression, full auto-update"

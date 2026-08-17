@@ -1,0 +1,118 @@
+# Knowledge Cards Index
+# Each knowledge card documents a specific pattern, convention, or architecture decision
+
+cards:
+  - name: "TOML Configuration System"
+    kind: configuration_system
+    category: configuration
+    scope:
+      - "crates/velocity-config/**"
+      - "examples/**"
+    source_files:
+      - crates/velocity-config/src/manifest.rs
+      - crates/velocity-config/src/parser.rs
+      - crates/velocity-config/src/variables.rs
+      - crates/velocity-config/src/auto_gen.rs
+    summary: "TOML-based configuration with path variable resolution, auto-generation, and deep validation for installer definition"
+
+  - name: "WASM Plugin Architecture"
+    kind: plugin_system
+    category: extensibility
+    scope:
+      - "crates/velocity-plugin-api/**"
+      - "examples/sample-plugin/**"
+    source_files:
+      - crates/velocity-plugin-api/src/plugin.rs
+      - crates/velocity-plugin-api/src/loader.rs
+      - examples/sample-plugin/plugin.json
+    summary: "Sandboxed WASM plugin system with 9 lifecycle hooks, Host API, and Wasmtime runtime for extending installer behavior"
+
+  - name: "AES-256-GCM Encryption and Security"
+    kind: security_system
+    category: security
+    scope:
+      - "crates/velocity-core/src/encryption.rs"
+      - "crates/velocity-core/src/security.rs"
+    source_files:
+      - crates/velocity-core/src/encryption.rs
+      - crates/velocity-core/src/security.rs
+    summary: "AES-256-GCM authenticated encryption with PBKDF2-HMAC-SHA256 key derivation (600k iterations) and BCryptGenRandom CSPRNG"
+
+  - name: "Rollback and Error Recovery"
+    kind: error_handling
+    category: reliability
+    scope:
+      - "crates/velocity-core/src/rollback.rs"
+      - "crates/velocity-core/src/error.rs"
+    source_files:
+      - crates/velocity-core/src/rollback.rs
+      - crates/velocity-core/src/error.rs
+    summary: "Automatic transaction tracking and reverse-order rollback for all installation operations with stress-tested correctness"
+
+  - name: "Structured Scripting Engine"
+    kind: scripting_engine
+    category: automation
+    scope:
+      - "crates/velocity-core/src/scripting.rs"
+      - "crates/velocity-config/src/manifest.rs"
+    source_files:
+      - crates/velocity-core/src/scripting.rs
+      - crates/velocity-config/src/manifest.rs
+    summary: "Structured scripting engine with 7 typed actions, variable substitution, condition evaluation, and configurable error policies (Abort/Continue/Retry)"
+
+  - name: "Condition Evaluation and Dependency Pipeline"
+    kind: condition_dependency
+    category: core_engine
+    scope:
+      - "crates/velocity-core/src/condition.rs"
+      - "crates/velocity-core/src/downloader.rs"
+      - "crates/velocity-core/src/dep_installer.rs"
+      - "crates/velocity-core/src/dep_resolver.rs"
+    source_files:
+      - crates/velocity-core/src/condition.rs
+      - crates/velocity-core/src/downloader.rs
+      - crates/velocity-core/src/dep_installer.rs
+      - crates/velocity-core/src/dep_resolver.rs
+    summary: "20+ condition types for install logic and dual-backend download pipeline (WinHTTP/ureq) with resumable downloads and SHA256 verification"
+
+  - name: "UI Wizard Architecture"
+    kind: ui_system
+    category: user_interface
+    scope:
+      - "crates/velocity-ui/**"
+    source_files:
+      - crates/velocity-ui/src/wizard.rs
+      - crates/velocity-ui/src/classic.rs
+      - crates/velocity-ui/src/modern.rs
+      - crates/velocity-ui/src/wizard_html.rs
+      - crates/velocity-ui/src/progress_dialog.rs
+      - crates/velocity-ui/src/wry_wizard.rs
+      - crates/velocity-ui/src/native_wizard.rs
+      - crates/velocity-ui/src/cross_platform.rs
+    summary: "Four wizard backends (Classic Win32, Modern, WebView2, wry+tao) with theme selection, component selection, and atomic progress tracking with ETA"
+
+  - name: "Windows Integration Modules"
+    kind: windows_integration
+    category: platform_integration
+    scope:
+      - "crates/velocity-core/src/registry.rs"
+      - "crates/velocity-core/src/shortcuts.rs"
+      - "crates/velocity-core/src/services.rs"
+      - "crates/velocity-core/src/env_vars.rs"
+      - "crates/velocity-core/src/file_assoc.rs"
+      - "crates/velocity-core/src/uninstaller.rs"
+    source_files:
+      - crates/velocity-core/src/registry.rs
+      - crates/velocity-core/src/shortcuts.rs
+      - crates/velocity-core/src/services.rs
+      - crates/velocity-core/src/env_vars.rs
+      - crates/velocity-core/src/file_assoc.rs
+      - crates/velocity-core/src/uninstaller.rs
+    summary: "Six Windows integration modules covering registry (winreg), shortcuts (IShellLink COM), services, environment variables, file associations, and self-contained uninstaller generation"
+
+# Conventions for knowledge cards:
+# - kind: Type of pattern (configuration_system, plugin_system, security_system, error_handling, etc.)
+# - category: Broad category (configuration, extensibility, security, reliability)
+# - scope: Glob patterns for files this applies to
+# - source_files: Specific files that implement this pattern
+# - summary: One-line description
