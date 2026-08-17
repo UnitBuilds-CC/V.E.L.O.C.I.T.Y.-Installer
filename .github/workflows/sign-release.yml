@@ -1,0 +1,100 @@
+# Code Signing for Release Builds
+#
+# This workflow signs the release binaries when a code signing certificate
+# is configured as GitHub secrets. If the secrets are not set, the build
+# still succeeds but the artifacts are unsigned.
+#
+# Required GitHub Secrets:
+#   SIGN_CERTIFICATE_BASE64 — Base64-encoded .pfx certificate file
+#   SIGN_CERTIFICATE_PASSWORD — Password for the .pfx file
+#
+# Optional:
+#   SIGN_TIMESTAMP_URL — RFC 3161 timestamp server (default: http://timestamp.digicert.com)
+
+name: Release Sign
+
+on:
+  workflow_call:
+    secrets:
+      SIGN_CERTIFICATE_BASE64:
+        required: false
+      SIGN_CERTIFICATE_PASSWORD:
+        required: false
+    outputs:
+      signed:
+        description: "Whether signing was performed"
+        value: ${{ jobs.sign.outputs.signed }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sign:
+    name: Sign Release Binaries
+    runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.sign-cli.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release --workspace
+
+      - name: Check if signing secrets are available
+        id: check
+        shell: pwsh
+        run: |
+          if ("${{ secrets.SIGN_CERTIFICATE_BASE64 }}" -ne "") {
+            Write-Host "Signing secrets found — will sign binaries"
+            echo "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "No signing secrets — binaries will be unsigned"
+            echo "available=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Import certificate
+        if: steps.check.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          $pfxBytes = [Convert]::FromBase64String("${{ secrets.SIGN_CERTIFICATE_BASE64 }}")
+          $pfxPath = "$env:RUNNER_TEMP\signing-cert.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+          echo "VELOCITY_SIGN_CERT_FILE=$pfxPath" >> $env:GITHUB_ENV
+          echo "VELOCITY_SIGN_CERT_PASSWORD=${{ secrets.SIGN_CERTIFICATE_PASSWORD }}" >> $env:GITHUB_ENV
+
+      - name: Sign CLI binary
+        id: sign-cli
+        if: steps.check.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          .\scripts\sign-release.ps1 -Path target\release\velocity.exe -Description "Velocity Installer CLI"
+
+      - name: Sign runtime binary
+        if: steps.check.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          .\scripts\sign-release.ps1 -Path target\release\velocity-runtime.exe -Description "Velocity Installer Runtime"
+
+      - name: Upload signed CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-cli-signed
+          path: target/release/velocity.exe
+
+      - name: Upload signed runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-runtime-signed
+          path: target/release/velocity-runtime.exe
+
+      - name: Cleanup certificate
+        if: always() && steps.check.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          if (Test-Path $env:VELOCITY_SIGN_CERT_FILE) {
+            Remove-Item $env:VELOCITY_SIGN_CERT_FILE -Force
+          }

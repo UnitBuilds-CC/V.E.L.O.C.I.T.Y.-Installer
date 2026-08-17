@@ -912,6 +912,16 @@ fn run_uninstall(exe_path: &std::path::Path, args: &RuntimeArgs) -> Result<()> {
 /// Install a panic hook that writes crash information to a log file in the temp
 /// directory. This ensures that even if the installer panics, there's a record
 /// of what went wrong for debugging.
+///
+/// The crash report includes:
+/// - Timestamp, PID, OS version, architecture
+/// - Velocity version
+/// - Panic location and message
+/// - Full backtrace
+/// - Command-line arguments (passwords redacted)
+///
+/// If the `VELOCITY_CRASH_UPLOAD_URL` environment variable is set, the crash
+/// report is also POSTed to that URL (best-effort, non-blocking).
 fn install_crash_handler() {
     std::panic::set_hook(Box::new(|info| {
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
@@ -930,16 +940,44 @@ fn install_crash_handler() {
 
         let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
+        // Collect system metadata
+        let os_version = std::env::var("OS").unwrap_or_else(|_| "Windows".to_string());
+        let arch =
+            std::env::var("PROCESSOR_ARCHITECTURE").unwrap_or_else(|_| "unknown".to_string());
+        let computer_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string());
+
+        // Sanitize command-line args (redact password)
+        let args: Vec<String> = std::env::args()
+            .map(|arg| {
+                if arg.starts_with("/P=") || arg.starts_with("/p=") || arg.starts_with("--password")
+                {
+                    "<REDACTED>".to_string()
+                } else {
+                    arg
+                }
+            })
+            .collect();
+        let args_str = args.join(" ");
+
         let crash_report = format!(
             "=== Velocity Installer Crash Report ===\n\
              Time: {:?}\n\
              PID: {}\n\
+             Velocity Version: {}\n\
+             OS: {} ({})\n\
+             Computer: {}\n\
+             Args: {}\n\
              Location: {}\n\
              Panic: {}\n\n\
              Backtrace:\n{}\n\
              =========================================\n",
             std::time::SystemTime::now(),
             std::process::id(),
+            env!("CARGO_PKG_VERSION"),
+            os_version,
+            arch,
+            computer_name,
+            args_str,
             location,
             payload,
             backtrace,
@@ -948,19 +986,85 @@ fn install_crash_handler() {
         // Write to temp directory
         let crash_dir = std::env::temp_dir().join("velocity_crashes");
         let _ = std::fs::create_dir_all(&crash_dir);
-        let crash_file = crash_dir.join(format!(
-            "crash_{}.log",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-        ));
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let crash_file = crash_dir.join(format!("crash_{}.log", timestamp));
         let _ = std::fs::write(&crash_file, &crash_report);
 
-        // Also log via tracing if possible
+        // Write a one-line crash summary for easy sharing
+        let summary_file = crash_dir.join("last_crash.txt");
+        let crash_summary = format!(
+            "Velocity Installer crashed at {}\n{}\nReport: {}",
+            location,
+            payload,
+            crash_file.display()
+        );
+        let _ = std::fs::write(&summary_file, &crash_summary);
+
+        // Optional: upload crash report if VELOCITY_CRASH_UPLOAD_URL is set
+        if let Ok(upload_url) = std::env::var("VELOCITY_CRASH_UPLOAD_URL") {
+            if !upload_url.is_empty() {
+                // Best-effort POST — don't block on failure
+                let _ = std::thread::spawn(move || {
+                    let _ = upload_crash_report(&upload_url, &crash_report);
+                });
+            }
+        }
+
+        // Console output
         eprintln!("FATAL: Installer crashed at {}\n{}", location, payload);
         eprintln!("Crash report written to: {}", crash_file.display());
+        eprintln!("Crash summary: {}", summary_file.display());
     }));
+}
+
+/// Best-effort upload of a crash report via HTTP POST.
+/// Uses curl (built-in on Windows 10+) to avoid external dependencies.
+fn upload_crash_report(url: &str, body: &str) -> Result<(), String> {
+    // Only allow http(s) URLs
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Invalid upload URL scheme".to_string());
+    }
+
+    // Write the crash report to a temp file and POST it via curl
+    let temp_file = std::env::temp_dir().join("velocity_crash_upload.txt");
+    std::fs::write(&temp_file, body).map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    let result = std::process::Command::new("curl")
+        .args([
+            "-s", // silent
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: text/plain",
+            "-H",
+            "User-Agent: VelocityInstaller/1.0 CrashReporter",
+            "--data-binary",
+            &temp_file.to_string_lossy(),
+            "--max-time",
+            "10", // 10 second timeout
+            url,
+        ])
+        .output();
+
+    let _ = std::fs::remove_file(&temp_file);
+
+    match result {
+        Ok(output) if output.status.success() => {
+            tracing::info!("Crash report uploaded successfully");
+            Ok(())
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!(
+                "Upload failed (exit {}): {}",
+                output.status, stderr
+            ))
+        }
+        Err(e) => Err(format!("Failed to run curl: {}", e)),
+    }
 }
 
 // ---------------------------------------------------------------------------

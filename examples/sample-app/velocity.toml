@@ -1,0 +1,201 @@
+# Sample Velocity Installer Configuration
+#
+# This is a realistic example that exercises all major installer features.
+# Use it as a starting template for your own application, or as a beta test
+# to verify the installer pipeline works end-to-end.
+#
+# Build:  velocity build
+# Test:   installer.exe /S /D=C:\TestInstall
+# Uninstall: installer.exe --uninstall --force
+
+[app]
+name = "Sample App"
+version = "1.0.0"
+publisher = "Velocity Team"
+icon = "assets/icon.ico"
+license = "LICENSE.txt"
+
+[install]
+default_dir = "{autopf}/SampleApp"
+start_menu = "Sample App"
+require_admin = true
+run_after_install = "sample-app.exe"
+close_app_before_install = "sample-app.exe"
+verify_checksums = false
+arch = "x64"
+create_desktop_shortcut = true
+
+# Overwrite behavior
+overwrite_mode = "always"
+
+# Reboot handling
+reboot_handling = "auto"
+
+# --- Files ---
+[files]
+source = ["./files/**"]
+exclude = ["*.pdb", "*.tmp", "*.log"]
+
+# --- Components (user-selectable) ---
+[[components]]
+id = "core"
+name = "Core Application"
+description = "Required application binaries and libraries"
+selected_by_default = true
+mandatory = true
+source = ["./files/bin/**"]
+
+[[components]]
+id = "docs"
+name = "Documentation"
+description = "User manuals and API reference (2.4 MB)"
+selected_by_default = true
+source = ["./files/docs/**"]
+
+[[components]]
+id = "sdk"
+name = "Developer SDK"
+description = "Headers, libraries, and code samples (8.1 MB)"
+selected_by_default = false
+source = ["./files/sdk/**"]
+
+[[components]]
+id = "samples"
+name = "Sample Projects"
+description = "Ready-to-run example projects (1.2 MB)"
+selected_by_default = false
+source = ["./files/samples/**"]
+
+# --- Remote Dependencies ---
+[[dependencies]]
+name = "VC++ 2022 Redistributable (x64)"
+url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+install_args = "/install /quiet /norestart"
+condition = "not_installed:Microsoft Visual C++ 2022 Redistributable (x64)"
+required = true
+priority = 10
+
+# --- Shortcuts ---
+[shortcuts]
+desktop = true
+start_menu = true
+quick_launch = false
+
+# --- Registry ---
+[[registry]]
+key = "Software\\SampleApp"
+name = "InstallPath"
+value = "{app}"
+root = "HKLM"
+
+[[registry]]
+key = "Software\\SampleApp"
+name = "Version"
+value = "{version}"
+root = "HKLM"
+
+[[registry]]
+key = "Software\\SampleApp\\Settings"
+name = "FirstRun"
+value = "1"
+root = "HKCU"
+
+# --- Environment Variables ---
+[[env_vars]]
+name = "SAMPLE_APP_HOME"
+value = "{app}"
+scope = "system"
+
+[[env_vars]]
+name = "SAMPLE_APP_VERSION"
+value = "{version}"
+scope = "system"
+
+# --- File Associations ---
+[[file_associations]]
+extension = ".sample"
+description = "Sample App Project File"
+handler = "sample-app.exe"
+icon_index = 1
+
+# --- Scripts ---
+[scripts]
+pre_install = ["echo Installing Sample App v{version}..."]
+post_install = ["echo Sample App v{version} installed successfully!"]
+
+# Structured post-install actions
+[[scripts.post_install_actions]]
+name = "Create config directory"
+action = "mkdir"
+path = "{install_dir}\\config"
+on_error = "continue"
+
+[[scripts.post_install_actions]]
+name = "Write version marker"
+action = "copy"
+src = "{install_dir}\\bin\\version.txt"
+dest = "{install_dir}\\config\\version.txt"
+condition = "file_missing:{install_dir}\\config\\version.txt"
+on_error = "continue"
+
+# --- Localization ---
+[localization]
+default_language = "en"
+
+[[localization.languages]]
+code = "de"
+name = "Deutsch"
+[localization.languages.strings]
+btn_next = "Weiter (&N) >"
+btn_back = "< Zurück (&B)"
+btn_install = "Installieren (&I)"
+btn_finish = "Fertigstellen (&F)"
+btn_cancel = "Abbrechen"
+btn_browse = "Durchsuchen..."
+page_welcome = "Willkommen"
+page_directory = "Installationsverzeichnis"
+page_components = "Komponenten auswählen"
+
+[[localization.languages]]
+code = "es"
+name = "Español"
+[localization.languages.strings]
+btn_next = "Siguiente (&N) >"
+btn_back = "< Atrás (&B)"
+btn_install = "Instalar (&I)"
+btn_finish = "Finalizar (&F)"
+btn_cancel = "Cancelar"
+btn_browse = "Examinar..."
+
+[[localization.languages]]
+code = "fr"
+name = "Français"
+[localization.languages.strings]
+btn_next = "Suivant (&N) >"
+btn_back = "< Retour (&B)"
+btn_install = "Installer (&I)"
+btn_finish = "Terminer (&F)"
+btn_cancel = "Annuler"
+btn_browse = "Parcourir..."
+
+[[localization.languages]]
+code = "ja"
+name = "日本語"
+[localization.languages.strings]
+btn_next = "次へ (&N) >"
+btn_back = "< 戻る (&B)"
+btn_install = "インストール (&I)"
+btn_finish = "完了 (&F)"
+btn_cancel = "キャンセル"
+btn_browse = "参照..."
+
+# --- Uninstall ---
+[uninstall]
+add_remove = true
+display_name = "Remove Sample App"
+help_url = "https://github.com/UnitBuilds-CC/V.E.L.O.C.I.T.Y.-Installer/issues"
+update_url = "https://raw.githubusercontent.com/UnitBuilds-CC/V.E.L.O.C.I.T.Y.-Installer/master/examples/sample-app/update-check.json"
+
+# --- UI ---
+[ui]
+theme = "classic"
