@@ -105,6 +105,27 @@ pub struct InstallConfig {
     /// Executable to launch after installation
     #[serde(default)]
     pub run_after_install: Option<String>,
+    /// Overwrite mode for existing files: "always", "never", "prompt", "newer_only"
+    #[serde(default = "default_overwrite_mode")]
+    pub overwrite_mode: String,
+    /// Reboot handling: "auto" (reboot if needed), "ask" (prompt user), "never"
+    #[serde(default = "default_reboot_handling")]
+    pub reboot_handling: String,
+    /// Whether this is a 64-bit install (overrides arch detection)
+    #[serde(default)]
+    pub install_64bit: Option<bool>,
+    /// Whether to show the component selection page
+    #[serde(default)]
+    pub show_components: bool,
+    /// Whether to show the language selection page
+    #[serde(default)]
+    pub show_language: bool,
+    /// Minimum disk space required (bytes, 0 = auto-calculate)
+    #[serde(default)]
+    pub min_disk_space: u64,
+    /// Whether to create a desktop shortcut
+    #[serde(default)]
+    pub create_desktop_shortcut: bool,
 }
 
 impl Default for InstallConfig {
@@ -117,6 +138,13 @@ impl Default for InstallConfig {
             require_admin: false,
             close_app_before_install: false,
             run_after_install: None,
+            overwrite_mode: default_overwrite_mode(),
+            reboot_handling: default_reboot_handling(),
+            install_64bit: None,
+            show_components: false,
+            show_language: false,
+            min_disk_space: 0,
+            create_desktop_shortcut: false,
         }
     }
 }
@@ -633,4 +661,12 @@ fn default_dep_type() -> String {
 
 fn default_language() -> String {
     "en".to_string()
+}
+
+fn default_overwrite_mode() -> String {
+    "always".to_string()
+}
+
+fn default_reboot_handling() -> String {
+    "ask".to_string()
 }
