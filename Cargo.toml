@@ -66,6 +66,7 @@ walkdir = "2"
 sha2 = "0.10"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
+aes-gcm = "0.10"
 
 # Internal crates
 velocity-config = { path = "crates/velocity-config" }

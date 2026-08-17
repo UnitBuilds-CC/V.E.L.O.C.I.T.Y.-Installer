@@ -22,3 +22,4 @@ walkdir = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+aes-gcm = { workspace = true }
