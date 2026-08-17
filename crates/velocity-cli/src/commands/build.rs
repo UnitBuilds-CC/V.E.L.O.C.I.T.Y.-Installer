@@ -8,15 +8,25 @@ pub fn run(
     output: Option<String>,
     compression: i32,
     compression_format: Option<String>,
+    package_format: Option<String>,
     runtime: Option<String>,
     delta: bool,
     quiet: bool,
 ) -> Result<()> {
     let project_dir = std::env::current_dir().context("Failed to get current directory")?;
 
+    // Determine package format (exe or msi)
+    let pkg_format = package_format.unwrap_or_else(|| "exe".to_string());
+    let is_msi = pkg_format.to_lowercase() == "msi";
+
+    let default_output = if is_msi {
+        "output/installer.msi"
+    } else {
+        "output/installer.exe"
+    };
     let output_path = output
         .map(PathBuf::from)
-        .unwrap_or_else(|| project_dir.join("output").join("installer.exe"));
+        .unwrap_or_else(|| project_dir.join(default_output));
 
     // Load config to get compression settings and version info
     let config_path = project_dir.join("velocity.toml");
@@ -37,7 +47,11 @@ pub fn run(
 
     if !quiet {
         println!();
-        println!("  Building Velocity installer...");
+        if is_msi {
+            println!("  Building MSI package...");
+        } else {
+            println!("  Building Velocity installer...");
+        }
         println!(
             "  Compression: {} (level {})",
             format,
@@ -49,6 +63,12 @@ pub fn run(
         println!();
     }
 
+    // MSI build path
+    if is_msi {
+        return build_msi_package(&project_dir, &output_path, &config_path, quiet);
+    }
+
+    // EXE build path
     let options = velocity_compiler::BuildOptions {
         project_dir: project_dir.clone(),
         output_path: output_path.clone(),
@@ -229,6 +249,50 @@ fn extract_installer_payload(installer_path: &std::path::Path, extract_dir: &std
         extract_dir.join(".extracted"),
         format!("Extracted from: {}", installer_path.display()),
     )?;
+
+    Ok(())
+}
+
+/// Build an MSI package from the current project.
+fn build_msi_package(
+    project_dir: &std::path::Path,
+    output_path: &std::path::Path,
+    config_path: &std::path::Path,
+    quiet: bool,
+) -> Result<()> {
+    let manifest: velocity_config::VelocityManifest = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).context("Failed to read velocity.toml")?;
+        toml::from_str(&content).context("Failed to parse velocity.toml")?
+    } else {
+        anyhow::bail!("velocity.toml not found — MSI builds require a configuration file");
+    };
+
+    let msi_options = velocity_compiler::MsiOptions {
+        output_path: output_path.to_path_buf(),
+        project_dir: project_dir.to_path_buf(),
+        architecture: manifest.install.arch.clone(),
+        language: 1033,
+        per_machine: manifest.install.require_admin,
+        upgrade_code: manifest.app.id.as_ref().map(|_id: &String| {
+            uuid::Uuid::new_v4().to_string()
+        }),
+    };
+
+    let result = velocity_compiler::build_msi(&manifest, &msi_options)
+        .context("MSI build failed")?;
+
+    if !quiet {
+        println!();
+        println!("  MSI build successful!");
+        println!();
+        println!("  Output:        {}", result.msi_path.display());
+        println!("  Size:          {} bytes", format_size(result.msi_size));
+        println!("  Files:         {}", result.file_count);
+        println!("  Components:    {}", result.component_count);
+        println!("  ProductCode:   {}", result.product_code);
+        println!("  UpgradeCode:   {}", result.upgrade_code);
+        println!();
+    }
 
     Ok(())
 }

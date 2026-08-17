@@ -3748,6 +3748,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "velocity-compiler",
  "velocity-config",
  "velocity-core",

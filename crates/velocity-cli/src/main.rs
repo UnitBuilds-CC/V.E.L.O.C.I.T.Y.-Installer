@@ -47,6 +47,10 @@ enum Commands {
         #[arg(short = 'f', long, default_value = "zstd")]
         format: Option<String>,
 
+        /// Package format: exe (default) or msi (Windows Installer)
+        #[arg(long, default_value = "exe")]
+        package_format: Option<String>,
+
         /// Path to the runtime binary
         #[arg(long)]
         runtime: Option<String>,
@@ -158,11 +162,12 @@ fn main() -> Result<()> {
             output,
             compression,
             format,
+            package_format,
             runtime,
             delta,
             quiet,
         } => {
-            commands::build::run(output, compression, format, runtime, delta, quiet)?;
+            commands::build::run(output, compression, format, package_format, runtime, delta, quiet)?;
         }
         Commands::Detect { dir } => {
             commands::detect::run(&dir)?;
