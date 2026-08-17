@@ -183,6 +183,15 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         );
     }
 
+    // Step 10: Make the installer executable (Unix platforms)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        std::fs::set_permissions(&options.output_path, perms)?;
+        info!("Set executable permissions on installer");
+    }
+
     let installer_size = std::fs::metadata(&options.output_path)?.len();
 
     info!(

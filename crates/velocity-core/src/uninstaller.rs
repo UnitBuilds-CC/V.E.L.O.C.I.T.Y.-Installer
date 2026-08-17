@@ -6,12 +6,11 @@ use std::path::Path;
 use tracing::info;
 use velocity_config::VelocityManifest;
 
-#[cfg(target_os = "windows")]
 use crate::file_assoc;
+use crate::shortcuts;
+
 #[cfg(target_os = "windows")]
 use crate::registry;
-#[cfg(target_os = "windows")]
-use crate::shortcuts;
 
 /// Generate an uninstaller executable.
 ///
@@ -85,58 +84,41 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
         let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
     }
 
-    // Windows-specific cleanup: services, env vars, file associations, registry, shortcuts
+    // Cross-platform cleanup: services, env vars, file associations, shortcuts
+    // Stop and remove services
+    if !info.services.is_empty() {
+        logging::log_op("UNINSTALL", "Removing services...");
+        let _ = crate::services::remove_services(&info.services);
+    }
+
+    // Remove environment variables
+    if !info.env_vars.is_empty() {
+        logging::log_op("UNINSTALL", "Removing environment variables...");
+        let _ = crate::env_vars::remove_env_vars(&info.env_vars);
+    }
+
+    // Remove file associations
+    if !info.file_associations.is_empty() {
+        logging::log_op("UNINSTALL", "Removing file associations...");
+        let _ = file_assoc::remove_file_associations(&info.file_associations);
+    }
+
+    // Remove shortcuts
+    logging::log_op("UNINSTALL", "Removing shortcuts...");
+    let _ = shortcuts::remove_shortcuts(
+        &info.shortcut_config,
+        &info.app_name,
+        info.start_menu_folder.as_deref(),
+    );
+
+    // Windows-specific: remove registry entries and uninstall entry
     #[cfg(target_os = "windows")]
     {
-        // Stop and remove services
-        if !info.services.is_empty() {
-            logging::log_op("UNINSTALL", "Removing services...");
-            let _ = crate::services::remove_services(&info.services);
-        }
-
-        // Remove environment variables
-        if !info.env_vars.is_empty() {
-            logging::log_op("UNINSTALL", "Removing environment variables...");
-            let _ = crate::env_vars::remove_env_vars(&info.env_vars);
-        }
-
-        // Remove file associations
-        if !info.file_associations.is_empty() {
-            logging::log_op("UNINSTALL", "Removing file associations...");
-            let _ = file_assoc::remove_file_associations(&info.file_associations);
-        }
-
-        // Remove registry entries
         if !info.registry_entries.is_empty() {
             logging::log_op("UNINSTALL", "Removing registry entries...");
             let _ = registry::remove_registry_entries(&info.registry_entries);
         }
-
-        // Remove shortcuts
-        logging::log_op("UNINSTALL", "Removing shortcuts...");
-        let _ = shortcuts::remove_shortcuts(
-            &info.shortcut_config,
-            &info.app_name,
-            info.start_menu_folder.as_deref(),
-        );
-
-        // Remove the uninstall registry entry
         let _ = registry::remove_uninstall_entry(&info.app_name);
-    }
-
-    // Non-Windows: remove .desktop files and config directories
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Remove .desktop files
-        let desktop_dir = crate::platform::start_menu_dir();
-        let desktop_file = desktop_dir.join(format!(
-            "{}.desktop",
-            info.app_name.to_lowercase().replace(' ', "-")
-        ));
-        if desktop_file.exists() {
-            let _ = std::fs::remove_file(&desktop_file);
-            logging::log_op("UNINSTALL", &format!("Removed: {}", desktop_file.display()));
-        }
     }
 
     // Remove installed files
@@ -154,12 +136,17 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
 
             if entry.file_type().is_file() {
                 // Don't delete the uninstaller itself until the end
-                if entry
+                let is_uninstaller = entry
                     .path()
                     .file_name()
-                    .map(|n| n == "uninstall.exe")
-                    .unwrap_or(false)
-                {
+                    .map(|n| {
+                        let name = n.to_string_lossy();
+                        name == "uninstall.exe"
+                            || name == "uninstall"
+                            || name.starts_with("uninstall")
+                    })
+                    .unwrap_or(false);
+                if is_uninstaller {
                     continue;
                 }
                 // Don't delete the log file until the end
@@ -194,7 +181,10 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
     // Run post-uninstall scripts
     for cmd in &info.post_uninstall {
         logging::log_op("SCRIPT", cmd);
+        #[cfg(target_os = "windows")]
         let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
+        #[cfg(not(target_os = "windows"))]
+        let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
     }
 
     logging::log_success(&format!("Uninstallation complete: {}", info.app_name));

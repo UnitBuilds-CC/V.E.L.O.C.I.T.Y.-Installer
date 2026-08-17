@@ -1,9 +1,6 @@
 //! High-level wizard orchestrator — selects and runs the appropriate UI theme.
 
-use crate::classic;
 use crate::error::{Result, UiError};
-use crate::modern;
-use crate::native_wizard;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -31,31 +28,45 @@ pub fn run_install_wizard(manifest: &VelocityManifest) -> Result<InstallWizardRe
 /// the wizard will perform extraction internally and show real progress.
 pub fn run_install_wizard_with_payload(
     manifest: &VelocityManifest,
-    payload_data: Option<Vec<u8>>,
+    _payload_data: Option<Vec<u8>>,
 ) -> Result<InstallWizardResult> {
-    match manifest.ui.theme.as_str() {
-        "classic" => run_classic(manifest),
-        "modern" | "native" => {
-            tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
-            run_native_with_payload(manifest, payload_data)
-        }
-        "webview" | "webview2" => {
-            tracing::info!(
-                "Using WebView2 modern wizard for theme: {}",
+    // On non-Windows, always use the terminal wizard
+    #[cfg(not(target_os = "windows"))]
+    {
+        tracing::info!("Using terminal wizard for non-Windows platform");
+        return crate::cross_platform::run_terminal_wizard(manifest);
+    }
+
+    // On Windows, select the appropriate GUI wizard
+    #[cfg(target_os = "windows")]
+    {
+        match manifest.ui.theme.as_str() {
+            "classic" => run_classic(manifest),
+            "modern" | "native" => {
+                tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
+                run_native_with_payload(manifest, _payload_data)
+            }
+            "webview" | "webview2" => {
+                tracing::info!(
+                    "Using WebView2 modern wizard for theme: {}",
+                    manifest.ui.theme
+                );
+                run_webview(manifest)
+            }
+            _ => Err(UiError::Other(format!(
+                "Unknown theme: {}",
                 manifest.ui.theme
-            );
-            run_webview(manifest)
+            ))),
         }
-        _ => Err(UiError::Other(format!(
-            "Unknown theme: {}",
-            manifest.ui.theme
-        ))),
     }
 }
 
-/// Run the classic wizard and map to InstallWizardResult.
+// ===========================================================================
+// Windows-specific wizard implementations
+// ===========================================================================
+#[cfg(target_os = "windows")]
 fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    let result = classic::run_classic_wizard(manifest)?;
+    let result = crate::classic::run_classic_wizard(manifest)?;
 
     if result.cancelled {
         return Err(UiError::Cancelled);
@@ -70,12 +81,12 @@ fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
     })
 }
 
-/// Run the native Win32 wizard with payload data.
+#[cfg(target_os = "windows")]
 fn run_native_with_payload(
     manifest: &VelocityManifest,
     payload_data: Option<Vec<u8>>,
 ) -> Result<InstallWizardResult> {
-    let result = native_wizard::run_native_wizard(manifest, payload_data)?;
+    let result = crate::native_wizard::run_native_wizard(manifest, payload_data)?;
 
     if result.cancelled {
         return Err(UiError::Cancelled);
@@ -90,9 +101,8 @@ fn run_native_with_payload(
     })
 }
 
-/// Run the WebView2-based modern wizard.
+#[cfg(target_os = "windows")]
 fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    // Build component list from manifest
     let components: Vec<(String, String, String, f64, bool, bool)> = manifest
         .components
         .iter()
@@ -116,7 +126,7 @@ fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .unwrap_or_default();
 
-    match modern::run_modern_wizard(
+    match crate::modern::run_modern_wizard(
         &manifest.app.name,
         &manifest.app.version,
         &manifest.app.publisher,
@@ -141,7 +151,6 @@ fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
                 "WebView2 runtime not found — falling back to classic wizard for {}",
                 manifest.app.name
             );
-            // Show an informational message to the user
             crate::classic::show_message(
                 &format!("{} Setup", manifest.app.name),
                 "The modern wizard requires the Microsoft Edge WebView2 runtime.\n\n\
@@ -153,6 +162,10 @@ fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         Err(e) => Err(e),
     }
 }
+
+// ===========================================================================
+// Cross-platform progress and display utilities
+// ===========================================================================
 
 /// Progress tracker with ETA calculation.
 ///
@@ -185,7 +198,6 @@ impl ProgressTracker {
         let current = self.completed_items.fetch_add(1, Ordering::Relaxed) + 1;
         let elapsed_ms = self.start_time.elapsed().as_millis() as u64;
 
-        // Update rolling average speed (files per ms * 1000)
         if elapsed_ms > 0 && current > 1 {
             let speed = (current * 1000) / elapsed_ms;
             self.speed_scaled.store(speed, Ordering::Relaxed);
@@ -197,13 +209,9 @@ impl ProgressTracker {
             0
         };
 
-        // Calculate ETA
         let eta_str = self.calculate_eta(current, elapsed_ms);
-
-        // Update last update time
         self.last_update_ms.store(elapsed_ms, Ordering::Relaxed);
 
-        // Display progress
         let display_name = if file_name.len() > 40 {
             format!("...{}", &file_name[file_name.len() - 37..])
         } else {
@@ -233,19 +241,15 @@ impl ProgressTracker {
         (current, self.total_items, pct, eta_str)
     }
 
-    /// Calculate estimated time remaining.
     fn calculate_eta(&self, current: u64, elapsed_ms: u64) -> String {
         if current == 0 || elapsed_ms == 0 {
             return "calculating...".to_string();
         }
-
         let remaining = self.total_items.saturating_sub(current);
         let speed = self.speed_scaled.load(Ordering::Relaxed);
-
         if speed == 0 {
             return "calculating...".to_string();
         }
-
         let eta_ms = (remaining * 1000) / speed;
         format_duration(eta_ms)
     }
@@ -278,7 +282,7 @@ fn format_duration(ms: u64) -> String {
     }
 }
 
-/// Show installation progress (legacy interface).
+/// Show installation progress (terminal-based).
 pub fn show_progress(current: usize, total: usize, file_name: &str) {
     let pct = if total > 0 {
         (current * 100) / total
@@ -292,8 +296,9 @@ pub fn show_progress(current: usize, total: usize, file_name: &str) {
 }
 
 /// Show installation complete message.
+#[cfg(target_os = "windows")]
 pub fn show_complete(app_name: &str, install_dir: &std::path::Path) {
-    classic::show_message(
+    crate::classic::show_message(
         &format!("{} Installed", app_name),
         &format!(
             "{} has been successfully installed to:\n\n{}\n\nClick OK to finish.",
@@ -303,14 +308,31 @@ pub fn show_complete(app_name: &str, install_dir: &std::path::Path) {
     );
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn show_complete(app_name: &str, install_dir: &std::path::Path) {
+    crate::cross_platform::show_complete(app_name, install_dir);
+}
+
 /// Show an error message.
+#[cfg(target_os = "windows")]
 pub fn show_error(title: &str, message: &str) {
-    classic::show_error(title, message);
+    crate::classic::show_error(title, message);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn show_error(title: &str, message: &str) {
+    crate::cross_platform::show_error(title, message);
 }
 
 /// Show the finish dialog with option to launch the app.
+#[cfg(target_os = "windows")]
 pub fn show_finish(app_name: &str, install_dir: &std::path::Path, run_after: Option<&str>) -> bool {
-    classic::show_finish_dialog(app_name, install_dir, run_after)
+    crate::classic::show_finish_dialog(app_name, install_dir, run_after)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn show_finish(app_name: &str, install_dir: &std::path::Path, run_after: Option<&str>) -> bool {
+    crate::cross_platform::show_finish(app_name, install_dir, run_after)
 }
 
 #[cfg(test)]

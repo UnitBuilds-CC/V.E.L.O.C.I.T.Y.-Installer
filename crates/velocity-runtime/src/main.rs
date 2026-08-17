@@ -21,6 +21,10 @@ use velocity_core::rollback::RollbackTracker;
 #[cfg(target_os = "windows")]
 mod windows;
 
+// Cross-platform module for Linux and macOS
+#[cfg(not(target_os = "windows"))]
+mod unix;
+
 /// Command-line arguments parsed at startup.
 struct RuntimeArgs {
     /// Silent/quiet mode — no UI, use defaults.
@@ -78,9 +82,7 @@ fn main() -> Result<()> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        eprintln!("Velocity Runtime is currently only supported on Windows.");
-        eprintln!("Linux and macOS support is planned for future releases.");
-        std::process::exit(1);
+        unix::run()
     }
 }
 

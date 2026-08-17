@@ -186,11 +186,20 @@ impl RollbackTracker {
                     }
                     #[cfg(not(target_os = "windows"))]
                     {
-                        let msg = format!(
-                            "Env var rollback not yet implemented on this platform: {} ({})",
-                            name, scope
-                        );
-                        logging::log_warning(&msg);
+                        // Use cross-platform env var removal
+                        let entry = velocity_config::EnvVarEntry {
+                            name: name.clone(),
+                            value: String::new(),
+                            scope: scope.clone(),
+                            append: false,
+                            delete_on_uninstall: true,
+                        };
+                        if let Err(e) = crate::env_vars::remove_env_vars(&[entry]) {
+                            let msg =
+                                format!("Failed to remove env var {} ({}): {}", name, scope, e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
                 RollbackOp::ServiceInstalled(name) => {
@@ -221,11 +230,23 @@ impl RollbackTracker {
                     }
                     #[cfg(not(target_os = "windows"))]
                     {
-                        let msg = format!(
-                            "Service rollback not yet implemented on this platform: {}",
-                            name
-                        );
-                        logging::log_warning(&msg);
+                        // Use cross-platform service removal
+                        let entry = velocity_config::ServiceEntry {
+                            name: name.clone(),
+                            display_name: String::new(),
+                            description: None,
+                            binary_path: String::new(),
+                            start_type: "manual".to_string(),
+                            account: None,
+                            dependencies: Vec::new(),
+                            start_on_install: false,
+                            remove_on_uninstall: true,
+                        };
+                        if let Err(e) = crate::services::remove_services(&[entry]) {
+                            let msg = format!("Failed to remove service {}: {}", name, e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
             }

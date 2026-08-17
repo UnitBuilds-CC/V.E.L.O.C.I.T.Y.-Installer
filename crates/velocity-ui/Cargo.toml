@@ -20,3 +20,8 @@ serde_json = { workspace = true }
 windows = { workspace = true }
 webview2-com = { workspace = true }
 winreg = { workspace = true }
+
+# Cross-platform GUI (for future wry+tao wizard)
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+wry = { workspace = true }
+tao = { workspace = true }
