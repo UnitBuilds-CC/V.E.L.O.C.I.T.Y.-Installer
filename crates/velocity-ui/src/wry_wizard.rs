@@ -14,8 +14,9 @@ use crate::error::UiError;
 use crate::wizard::InstallWizardResult;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use tao::event::{Event, StartCause, WindowEvent};
+use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop};
 use tao::platform::run_return::EventLoopExtRunReturn;
 use tao::window::WindowBuilder;
@@ -196,13 +197,16 @@ pub fn run_wry_wizard(
         .map_err(|e| UiError::WindowCreation(format!("{}", e)))?;
 
     // Build the webview with IPC handler
+    // Use a channel to forward browse requests to the event loop
+    let (browse_tx, browse_rx) = mpsc::channel::<()>();
     let webview = WebViewBuilder::new()
         .with_html(html)
         .with_ipc_handler({
             let state = state.clone();
+            let browse_tx = browse_tx.clone();
             move |request| {
                 let json = request.body().clone();
-                handle_ipc_message(&state, &json);
+                handle_ipc_message(&state, &json, &browse_tx);
             }
         })
         .build(&window)
@@ -235,6 +239,23 @@ pub fn run_wry_wizard(
         {
             while gtk::events_pending() {
                 gtk::main_iteration();
+            }
+        }
+
+        // Process browse folder dialog requests from the IPC handler
+        if let Ok(()) = browse_rx.try_recv() {
+            if let Some(dir) = show_folder_dialog() {
+                // Update state
+                if let Ok(mut st) = state_close.lock() {
+                    st.install_dir = dir.clone();
+                }
+                // Update the directory input in the webview
+                let escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
+                if let Ok(wv) = webview_close.lock() {
+                    let script =
+                        format!("document.getElementById('dir-input').value='{}'", escaped);
+                    let _ = wv.evaluate_script(&script);
+                }
             }
         }
 
@@ -302,7 +323,7 @@ function onMsg(fn) { window.__velocityHandler = fn; }
 }
 
 /// Handle an IPC message from JavaScript.
-fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str) {
+fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str, browse_tx: &mpsc::Sender<()>) {
     let msg: std::result::Result<JsMessage, _> = serde_json::from_str(json);
     match msg {
         Ok(JsMessage::Ready) => {
@@ -364,7 +385,8 @@ fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str) {
             st.cancelled = true;
         }
         Ok(JsMessage::Browse) => {
-            info!("Browse clicked (native file dialog not yet implemented)");
+            // Forward to event loop for native folder dialog
+            let _ = browse_tx.send(());
         }
         Ok(JsMessage::SetDir(dir)) => {
             let mut st = match state.lock() {
@@ -404,6 +426,86 @@ fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str) {
         Err(e) => {
             warn!("Failed to parse wry IPC message: {} (json: {})", e, json);
         }
+    }
+}
+
+/// Show a native folder selection dialog.
+///
+/// Uses `zenity` on Linux (standard on most desktop environments) and
+/// `osascript` on macOS (built-in). Returns `None` if the user cancels
+/// or if no dialog tool is available.
+fn show_folder_dialog() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        // Try zenity first (GNOME/GTK standard)
+        if let Ok(output) = std::process::Command::new("zenity")
+            .args([
+                "--file-selection",
+                "--directory",
+                "--title=Select Installation Directory",
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+            // User cancelled or zenity not available
+            if output.status.code() == Some(1) {
+                return None; // User cancelled
+            }
+        }
+
+        // Try kdialog (KDE)
+        if let Ok(output) = std::process::Command::new("kdialog")
+            .args([
+                "--getexistingdirectory",
+                ".",
+                "--title",
+                "Select Installation Directory",
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+
+        warn!("No folder dialog available (install zenity or kdialog)");
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"tell application "Finder" to activate
+try
+    set theFolder to choose folder with prompt "Select Installation Directory"
+    return POSIX path of theFolder
+on error
+    return ""
+end try"#;
+        if let Ok(output) = std::process::Command::new("osascript")
+            .args(["-e", script])
+            .output()
+        {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
     }
 }
 

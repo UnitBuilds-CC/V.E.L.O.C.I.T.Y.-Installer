@@ -1,12 +1,7 @@
 //! Disk space validation before installation.
 //!
 //! Checks that the target drive has enough free space for the installation.
-//!
-//! Note: `get_free_disk_space` uses Win32 GetDiskFreeSpaceExW and is Windows-only.
-//! The entire module is cfg-gated; cross-platform disk space checking will be
-//! provided via the platform module.
-
-#![cfg(target_os = "windows")]
+//! Cross-platform: uses GetDiskFreeSpaceExW on Windows, `df` on Unix.
 
 use crate::error::{CoreError, Result};
 use std::path::Path;
@@ -30,11 +25,11 @@ pub fn check_disk_space(target_dir: &Path, required_bytes: u64) -> Result<()> {
 }
 
 /// Get the free disk space on the drive containing the given path.
+#[cfg(target_os = "windows")]
 pub fn get_free_disk_space(path: &Path) -> Result<u64> {
     use windows::core::*;
     use windows::Win32::Storage::FileSystem::*;
 
-    // Get the root of the drive
     let root = get_drive_root(path);
     let root_wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -61,7 +56,56 @@ pub fn get_free_disk_space(path: &Path) -> Result<u64> {
     }
 }
 
+/// Get the free disk space on the filesystem containing the given path.
+///
+/// Uses `df -P` (POSIX format) for portability across Linux and macOS.
+#[cfg(not(target_os = "windows"))]
+pub fn get_free_disk_space(path: &Path) -> Result<u64> {
+    // Use df -P for POSIX-portable output format
+    // Columns: Filesystem 1024-blocks Used Available Capacity Mounted-on
+    let target = if path.exists() {
+        path.to_path_buf()
+    } else {
+        // If path doesn't exist yet, check the nearest existing parent
+        path.ancestors()
+            .find(|a| a.exists())
+            .unwrap_or(Path::new("/"))
+    };
+
+    let output = std::process::Command::new("df")
+        .args(["-P"])
+        .arg(&target)
+        .output()
+        .map_err(|e| CoreError::Other(format!("Failed to run df: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(CoreError::Other(format!(
+            "df failed for path: {}",
+            target.display()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse the second line (first line is headers)
+    // Available column is the 4th field (index 3), in 1024-byte blocks
+    for line in stdout.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() >= 5 {
+            // Available is field index 3 in POSIX df output
+            if let Ok(available_kb) = fields[3].parse::<u64>() {
+                return Ok(available_kb * 1024); // Convert KB to bytes
+            }
+        }
+    }
+
+    Err(CoreError::Other(format!(
+        "Could not parse df output for: {}",
+        target.display()
+    )))
+}
+
 /// Get the drive root from a path (e.g., "C:\").
+#[cfg(target_os = "windows")]
 fn get_drive_root(path: &Path) -> String {
     let path_str = path.to_string_lossy();
     if path_str.len() >= 2 && path_str.as_bytes()[1] == b':' {
@@ -118,9 +162,24 @@ mod tests {
         assert_eq!(format_bytes(1073741824), "1.0 GB");
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn test_get_drive_root() {
         assert_eq!(get_drive_root(Path::new("C:\\Users\\test")), "C:\\");
         assert_eq!(get_drive_root(Path::new("D:\\Program Files\\app")), "D:\\");
+    }
+
+    #[test]
+    fn test_check_disk_space_current_dir() {
+        // Current directory should always have some space
+        let result = check_disk_space(Path::new("."), 1);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_disk_space_impossible_amount() {
+        // Requesting 1 EB should fail on any real system
+        let result = check_disk_space(Path::new("."), u64::MAX);
+        assert!(result.is_err());
     }
 }
