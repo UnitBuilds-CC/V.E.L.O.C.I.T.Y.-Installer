@@ -88,6 +88,10 @@ struct WizardData {
     // Payload for extraction during install phase
     payload_data: Option<Vec<u8>>,
     wizard_state: Option<Arc<WizardState>>,
+    // Sidebar image
+    sidebar_image_path: Option<String>,
+    // Sidebar bitmap
+    h_sidebar_bmp: HBITMAP,
     h_page_title: HWND,
     h_page_desc: HWND,
     h_sidebar_title: HWND,
@@ -127,11 +131,13 @@ pub fn run_native_wizard(
     let has_components = !manifest.components.is_empty();
     let components: Vec<String> = manifest.components.iter().map(|c| c.name.clone()).collect();
     let accent = parse_accent_color(&manifest.ui.accent_color);
+    let sidebar_image_path = manifest.ui.sidebar.as_ref()
+        .map(|p| p.to_string_lossy().to_string());
 
     run_wizard_window(
         &manifest.app.name, &manifest.app.version, &default_dir,
         has_license, has_components, &license_text, accent, &components,
-        payload_data,
+        payload_data, sidebar_image_path,
     )
 }
 
@@ -155,6 +161,7 @@ fn run_wizard_window(
     has_license: bool, has_components: bool, license_text: &str,
     accent_rgb: [u8; 3], components: &[String],
     payload_data: Option<Vec<u8>>,
+    sidebar_image_path: Option<String>,
 ) -> Result<NativeWizardResult> {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
@@ -185,6 +192,8 @@ fn run_wizard_window(
             all_components: components.to_vec(), launch_after: false,
             install_completed: false,
             payload_data, wizard_state: None,
+            sidebar_image_path,
+            h_sidebar_bmp: HBITMAP::default(),
             h_page_title: HWND::default(), h_page_desc: HWND::default(),
             h_sidebar_title: HWND::default(), h_sidebar_ver: HWND::default(),
             h_license: HWND::default(), h_dir_edit: HWND::default(),
@@ -265,6 +274,17 @@ unsafe extern "system" fn wizard_wnd_proc(
             let p = cs.lpCreateParams as *mut WizardData;
             if p.is_null() { return LRESULT(-1); }
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, p as isize);
+            // Load sidebar image if specified
+            if let Some(ref img_path) = (*p).sidebar_image_path {
+                let path_w = wn(img_path);
+                let bmp = LoadImageW(
+                    None, PCWSTR(path_w.as_ptr()), IMAGE_BITMAP,
+                    150, 380, LR_LOADFROMFILE | LR_DEFAULTCOLOR,
+                );
+                if let Ok(hbmp) = bmp {
+                    (*p).h_sidebar_bmp = HBITMAP(hbmp.0);
+                }
+            }
             create_controls(hwnd, &mut *p);
             show_page(hwnd, &mut *p);
             LRESULT(0)
@@ -674,19 +694,30 @@ unsafe fn start_installation(hwnd: HWND, d: &mut WizardData, payload: Vec<u8>) {
 unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
-    let rgb = d.accent_rgb;
-    let color = COLORREF(rgb[0] as u32 | (rgb[1] as u32) << 8 | (rgb[2] as u32) << 16);
-    let brush = CreateSolidBrush(color);
     let rect = RECT { left: 0, top: 0, right: 150, bottom: 380 };
-    let _ = FillRect(hdc, &rect, brush);
+
+    if d.h_sidebar_bmp.0 != std::ptr::null_mut() {
+        // Draw sidebar bitmap image
+        let mem_dc = CreateCompatibleDC(hdc);
+        let old_bmp = SelectObject(mem_dc, d.h_sidebar_bmp);
+        let _ = BitBlt(hdc, 0, 0, 150, 380, mem_dc, 0, 0, SRCCOPY);
+        let _ = SelectObject(mem_dc, old_bmp);
+        let _ = DeleteDC(mem_dc);
+    } else {
+        // Draw solid color sidebar
+        let rgb = d.accent_rgb;
+        let color = COLORREF(rgb[0] as u32 | (rgb[1] as u32) << 8 | (rgb[2] as u32) << 16);
+        let brush = CreateSolidBrush(color);
+        let _ = FillRect(hdc, &rect, brush);
+        let _ = DeleteObject(brush);
+    }
+
     SetTextColor(hdc, COLORREF(0x00FFFFFF));
     SetBkMode(hdc, TRANSPARENT);
     let brand = wn(&format!("{}\n{}", d.app_name, d.version));
     let mut br = RECT { left: 12, top: 20, right: 138, bottom: 100 };
-    // DrawTextW in windows 0.58 takes (&mut [u16]) not separate ptr+len
     let brand_slice: &mut [u16] = &mut brand.clone();
     let _ = DrawTextW(hdc, brand_slice, &mut br, DT_LEFT | DT_TOP | DT_WORDBREAK);
-    let _ = DeleteObject(brush);
     let _ = EndPaint(hwnd, &ps);
 }
 
