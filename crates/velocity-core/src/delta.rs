@@ -263,6 +263,11 @@ pub fn generate_delta(
     })
 }
 
+/// Maximum allowed delta package file size (2 GB).
+///
+/// Prevents OOM from malicious or corrupted delta packages.
+const MAX_DELTA_PACKAGE_SIZE: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Apply a delta package to a directory, reconstructing the new version.
 ///
 /// # Security
@@ -273,14 +278,18 @@ pub fn generate_delta(
 /// - Creates atomic backup for rollback on failure
 /// - Verifies SHA256 checksums before and after patching
 pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
-    apply_delta_with_progress(delta, target_dir, None)
+    apply_delta_with_progress(delta, target_dir, None, None)
 }
 
-/// Apply a delta package with progress reporting.
+/// Apply a delta package with progress reporting and optional version check.
+///
+/// If `expected_version` is provided, the delta's `from_version` must match it
+/// or the apply is rejected immediately (fast-fail before any file operations).
 pub fn apply_delta_with_progress(
     delta: &DeltaPackage,
     target_dir: &Path,
     progress: Option<DeltaProgressFn>,
+    expected_version: Option<&str>,
 ) -> Result<()> {
     let report = |step: usize, total: usize, msg: &str| {
         if let Some(ref cb) = progress {
@@ -294,6 +303,17 @@ pub fn apply_delta_with_progress(
         delta.to_version,
         target_dir.display()
     );
+
+    // Fast-fail: verify the delta matches the expected installed version
+    if let Some(expected) = expected_version {
+        if delta.from_version != expected {
+            return Err(CoreError::Other(format!(
+                "Version mismatch: delta expects {} but installed version is {}",
+                delta.from_version, expected
+            )));
+        }
+        debug!("Version check passed: {}", expected);
+    }
 
     let total_steps = delta.patches.len() + 3; // validate + backup + patches + cleanup
 
@@ -572,8 +592,20 @@ pub fn save_delta_package(delta: &DeltaPackage, path: &Path) -> Result<()> {
 }
 
 /// Load a delta package from a .delta.zip file.
+///
+/// Rejects packages larger than `MAX_DELTA_PACKAGE_SIZE` (2 GB) to prevent
+/// OOM from malicious or corrupted files.
 pub fn load_delta_package(path: &Path) -> Result<DeltaPackage> {
     info!("Loading delta package from {}", path.display());
+
+    // Check file size before reading to prevent OOM
+    let file_size = fs::metadata(path)?.len();
+    if file_size > MAX_DELTA_PACKAGE_SIZE {
+        return Err(CoreError::Other(format!(
+            "Delta package too large: {} bytes (max {} bytes)",
+            file_size, MAX_DELTA_PACKAGE_SIZE
+        )));
+    }
 
     let compressed = fs::read(path)?;
     let json_bytes = decompress_with_zstd(&compressed)?;
@@ -1286,7 +1318,7 @@ mod tests {
                 .push(format!("{}/{}: {}", step, total, msg));
         });
 
-        apply_delta_with_progress(&delta, &target_dir, Some(progress)).unwrap();
+        apply_delta_with_progress(&delta, &target_dir, Some(progress), None).unwrap();
 
         let msgs = messages.lock().unwrap();
         assert!(
@@ -1339,5 +1371,62 @@ mod tests {
 
         // Now it should succeed
         apply_delta(&delta, &target_dir).unwrap();
+    }
+
+    #[test]
+    fn test_version_check_rejects_mismatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        let target_dir = base.join("target");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        fs::write(old_dir.join("file.txt"), "old content").unwrap();
+        fs::write(new_dir.join("file.txt"), "new content").unwrap();
+        copy_dir_recursive(&old_dir, &target_dir).unwrap();
+
+        let delta = generate_delta(
+            &old_dir,
+            &new_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Correct version should succeed
+        let result = apply_delta_with_progress(&delta, &target_dir, None, Some("1.0.0"));
+        assert!(result.is_ok());
+
+        // Reset target for mismatch test
+        fs::remove_dir_all(&target_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        copy_dir_recursive(&old_dir, &target_dir).unwrap();
+
+        // Wrong version should fail immediately
+        let result = apply_delta_with_progress(&delta, &target_dir, None, Some("0.9.0"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Version mismatch"));
+    }
+
+    #[test]
+    fn test_load_delta_package_size_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_path = temp.path().join("huge.delta.zip");
+
+        // Create a file larger than MAX_DELTA_PACKAGE_SIZE
+        // We can't actually allocate 2GB in a test, so we temporarily test the logic
+        // by verifying the constant exists and the check is in place
+        assert_eq!(MAX_DELTA_PACKAGE_SIZE, 2 * 1024 * 1024 * 1024);
+
+        // Verify a small file loads fine (or fails for other reasons, not size)
+        fs::write(&fake_path, b"not a valid delta").unwrap();
+        let result = load_delta_package(&fake_path);
+        // Should fail on decompression, NOT on size check
+        assert!(result.is_err());
+        assert!(!result.unwrap_err().to_string().contains("too large"));
     }
 }

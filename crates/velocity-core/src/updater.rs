@@ -204,10 +204,18 @@ pub fn should_use_delta(delta_info: &Option<DeltaInfo>, full_size: u64) -> bool 
 
 /// Download and apply a delta update.
 ///
-/// Downloads the delta package, applies it to the current installation,
-/// and verifies the result.
-pub fn apply_delta_update(install_dir: &std::path::Path, delta_info: &DeltaInfo) -> Result<()> {
-    use crate::delta::{apply_delta, load_delta_package};
+/// Downloads the delta package, verifies its integrity, applies it to the
+/// current installation, and verifies the result. Temp files are cleaned up
+/// even if the apply fails.
+///
+/// `current_version` is the installed version — used to verify the delta's
+/// `from_version` matches before applying (fast-fail on mismatch).
+pub fn apply_delta_update(
+    install_dir: &std::path::Path,
+    delta_info: &DeltaInfo,
+    current_version: &str,
+) -> Result<()> {
+    use crate::delta::{apply_delta_with_progress, load_delta_package};
 
     info!("Downloading delta update from: {}", delta_info.url);
 
@@ -216,22 +224,40 @@ pub fn apply_delta_update(install_dir: &std::path::Path, delta_info: &DeltaInfo)
 
     info!("Downloaded {} bytes", delta_data.len());
 
+    // Verify download integrity — size should match what the server reported
+    if delta_info.size > 0 && delta_data.len() as u64 != delta_info.size {
+        return Err(CoreError::Other(format!(
+            "Download size mismatch: expected {} bytes, got {} bytes",
+            delta_info.size,
+            delta_data.len()
+        )));
+    }
+
     // Save to temporary file
     let temp_delta = install_dir.join(".delta-temp.zip");
-    std::fs::write(&temp_delta, &delta_data)?;
 
-    // Load delta package
-    let delta = load_delta_package(&temp_delta)?;
+    // Ensure temp file is cleaned up even if apply fails
+    let result = (|| -> Result<()> {
+        std::fs::write(&temp_delta, &delta_data)?;
 
-    // Apply delta
-    info!(
-        "Applying delta: {} -> {}",
-        delta.from_version, delta.to_version
-    );
-    apply_delta(&delta, install_dir)?;
+        // Load delta package (includes size limit check)
+        let delta = load_delta_package(&temp_delta)?;
 
-    // Cleanup temporary file
-    std::fs::remove_file(&temp_delta)?;
+        // Apply delta with version check (fast-fail if wrong version)
+        info!(
+            "Applying delta: {} -> {} (current: {})",
+            delta.from_version, delta.to_version, current_version
+        );
+        apply_delta_with_progress(&delta, install_dir, None, Some(current_version))?;
+
+        Ok(())
+    })();
+
+    // Always clean up temp file
+    let _ = std::fs::remove_file(&temp_delta);
+
+    // Propagate any error from the apply
+    result?;
 
     info!("Delta update applied successfully");
 

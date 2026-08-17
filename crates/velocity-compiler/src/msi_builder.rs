@@ -1271,6 +1271,12 @@ fn build_and_embed_cabinet(
     package: &mut Package<Cursor<Vec<u8>>>,
     files: &[(PathBuf, String)],
 ) -> Result<()> {
+    // Nothing to embed — skip cabinet creation
+    if files.is_empty() {
+        info!("No files to cabinet — skipping");
+        return Ok(());
+    }
+
     // Build cabinet in memory using a Cursor (which implements Write + Seek)
     let mut cab_data = Cursor::new(Vec::new());
     {
