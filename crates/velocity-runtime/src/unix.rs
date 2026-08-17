@@ -71,7 +71,19 @@ pub fn run() -> Result<()> {
             install_completed: false,
         }
     } else {
-        match velocity_ui::run_install_wizard(&manifest) {
+        match velocity_ui::run_install_wizard_with_payload(
+            &manifest,
+            Some(payload_data.clone()),
+            Some(
+                run_install_with_progress
+                    as fn(
+                        &VelocityManifest,
+                        &std::path::Path,
+                        &[u8],
+                        fn(u32, String),
+                    ) -> Result<()>,
+            ),
+        ) {
             Ok(result) => result,
             Err(velocity_ui::UiError::Cancelled) => {
                 info!("Installation cancelled by user");
@@ -135,20 +147,56 @@ pub fn run() -> Result<()> {
         disk_space::format_bytes(estimated_size)
     );
 
+    // Run the installation (or skip if already done inside the wizard)
+    if !wizard_result.install_completed {
+        let install_dir_clone = install_dir.clone();
+        let manifest_clone = manifest.clone();
+        let payload_clone = payload_data.clone();
+        run_install_with_progress(
+            &manifest_clone,
+            &install_dir_clone,
+            &payload_clone,
+            |pct, msg| {
+                info!("[{}%] {}", pct, msg);
+            },
+        )?;
+    }
+
+    // Show completion
+    velocity_ui::show_complete(&manifest.app.name, &install_dir);
+    info!(
+        "Installation complete: {} v{}",
+        manifest.app.name, manifest.app.version
+    );
+
+    Ok(())
+}
+
+/// Run the full installation with progress reporting.
+///
+/// Performs directory creation, file extraction, shortcut creation,
+/// service installation, environment variable setup, file associations,
+/// uninstaller generation, and post-install scripts. Reports progress
+/// via the `progress` callback as `fn(percentage, status_message)`.
+pub fn run_install_with_progress(
+    manifest: &VelocityManifest,
+    install_dir: &std::path::Path,
+    payload_data: &[u8],
+    progress: fn(u32, String),
+) -> Result<()> {
     // Create install directory
-    if let Err(e) = std::fs::create_dir_all(&install_dir) {
-        error!("Failed to create install directory: {}", e);
-        velocity_ui::show_error("Error", &format!("Failed to create directory: {}", e));
-        std::process::exit(1);
+    progress(0, "Creating install directory...".into());
+    if let Err(e) = std::fs::create_dir_all(install_dir) {
+        return Err(anyhow::anyhow!("Failed to create install directory: {}", e));
     }
 
     // Set up rollback tracker
     let mut rollback = RollbackTracker::new();
-    rollback.track_dir(install_dir.clone());
+    rollback.track_dir(install_dir.to_path_buf());
 
     // Extract files
-    info!("Extracting files...");
-    match extract::extract_from_bytes(&payload_data, &install_dir, Some(&mut rollback)) {
+    progress(5, "Extracting files...".into());
+    match extract::extract_from_bytes(payload_data, install_dir, Some(&mut rollback)) {
         Ok(stats) => {
             info!(
                 "Extracted {} files ({} bytes) to {}",
@@ -159,27 +207,22 @@ pub fn run() -> Result<()> {
         }
         Err(e) => {
             error!("Extraction failed: {}", e);
-            velocity_ui::show_error("Extraction Error", &format!("{}", e));
-            warn!("Rolling back...");
             let _ = rollback.rollback();
-            std::process::exit(1);
+            return Err(anyhow::anyhow!("Extraction failed: {}", e));
         }
     }
+    progress(50, "Files extracted".into());
 
     // Create shortcuts
     if manifest.shortcuts.desktop || manifest.shortcuts.start_menu {
-        info!("Creating shortcuts...");
-        let exe_name = if cfg!(windows) {
-            format!("{}.exe", manifest.app.name.replace(' ', "-"))
-        } else {
-            manifest.app.name.replace(' ', "-").to_lowercase()
-        };
+        progress(55, "Creating shortcuts...".into());
+        let exe_name = manifest.app.name.replace(' ', "-").to_lowercase();
         let target_exe = install_dir.join(&exe_name);
         if let Err(e) = shortcuts::create_shortcuts(
             &manifest.shortcuts,
             &manifest.app.name,
             &target_exe,
-            &install_dir,
+            install_dir,
             manifest.install.start_menu.as_deref(),
         ) {
             warn!("Failed to create shortcuts: {}", e);
@@ -188,15 +231,15 @@ pub fn run() -> Result<()> {
 
     // Install services
     if !manifest.services.is_empty() {
-        info!("Installing services...");
-        if let Err(e) = services::install_services(&manifest.services, &install_dir) {
+        progress(65, "Installing services...".into());
+        if let Err(e) = services::install_services(&manifest.services, install_dir) {
             warn!("Failed to install services: {}", e);
         }
     }
 
     // Apply environment variables
     if !manifest.env_vars.is_empty() {
-        info!("Setting environment variables...");
+        progress(75, "Setting environment variables...".into());
         if let Err(e) = env_vars::apply_env_vars(&manifest.env_vars) {
             warn!("Failed to set environment variables: {}", e);
         }
@@ -204,7 +247,7 @@ pub fn run() -> Result<()> {
 
     // Apply file associations
     if !manifest.file_associations.is_empty() {
-        info!("Setting file associations...");
+        progress(80, "Setting file associations...".into());
         let exe_name = manifest.app.name.replace(' ', "-").to_lowercase();
         let target_exe = install_dir.join(&exe_name);
         if let Err(e) =
@@ -215,20 +258,15 @@ pub fn run() -> Result<()> {
     }
 
     // Generate uninstaller
-    info!("Generating uninstaller...");
+    progress(85, "Generating uninstaller...".into());
     let current_exe = std::env::current_exe()?;
     let runtime_bytes = std::fs::read(&current_exe).unwrap_or_default();
     if !runtime_bytes.is_empty() {
-        let uninstaller_name = if cfg!(windows) {
-            "uninstall.exe"
-        } else {
-            "uninstall"
-        };
-        let uninstaller_path = install_dir.join(uninstaller_name);
+        let uninstaller_path = install_dir.join("uninstall");
         match uninstaller::generate_uninstaller(
             &runtime_bytes,
-            &manifest,
-            &install_dir,
+            manifest,
+            install_dir,
             &uninstaller_path,
         ) {
             Ok(_) => {
@@ -242,23 +280,17 @@ pub fn run() -> Result<()> {
     }
 
     // Run post-install scripts
-    for cmd in &manifest.scripts.post_install {
-        info!("Running post-install script: {}", cmd);
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
-        #[cfg(not(target_os = "windows"))]
-        let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
+    if !manifest.scripts.post_install.is_empty() {
+        progress(90, "Running post-install scripts...".into());
+        for cmd in &manifest.scripts.post_install {
+            info!("Running post-install script: {}", cmd);
+            let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
+        }
     }
 
     // Clear rollback (installation succeeded)
     rollback.clear();
-
-    // Show completion
-    velocity_ui::show_complete(&manifest.app.name, &install_dir);
-    info!(
-        "Installation complete: {} v{}",
-        manifest.app.name, manifest.app.version
-    );
+    progress(100, "Installation complete".into());
 
     Ok(())
 }

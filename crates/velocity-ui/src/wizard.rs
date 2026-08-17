@@ -19,22 +19,45 @@ pub struct InstallWizardResult {
 
 /// Run the installer wizard based on the manifest's UI configuration.
 pub fn run_install_wizard(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    run_install_wizard_with_payload(manifest, None)
+    run_install_wizard_with_payload::<
+        fn(
+            &VelocityManifest,
+            &std::path::Path,
+            &[u8],
+            fn(u32, String),
+        ) -> std::result::Result<(), anyhow::Error>,
+        anyhow::Error,
+    >(manifest, None, None)
 }
 
 /// Run the installer wizard with payload data for in-wizard extraction.
 ///
 /// When `payload_data` is provided and the theme is "native"/"modern",
 /// the wizard will perform extraction internally and show real progress.
-pub fn run_install_wizard_with_payload(
+///
+/// On non-Windows, `install_fn` is passed to the wry wizard so it can
+/// run the installation in a background thread with real progress updates.
+pub fn run_install_wizard_with_payload<F, E>(
     manifest: &VelocityManifest,
     _payload_data: Option<Vec<u8>>,
-) -> Result<InstallWizardResult> {
+    _install_fn: Option<F>,
+) -> Result<InstallWizardResult>
+where
+    F: Fn(
+            &VelocityManifest,
+            &std::path::Path,
+            &[u8],
+            fn(u32, String),
+        ) -> std::result::Result<(), E>
+        + Send
+        + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
     // On non-Windows, use the wry+tao GUI wizard
     #[cfg(not(target_os = "windows"))]
     {
         tracing::info!("Using wry+tao GUI wizard for non-Windows platform");
-        return crate::wry_wizard::run_wry_wizard(manifest);
+        return crate::wry_wizard::run_wry_wizard(manifest, _payload_data, _install_fn);
     }
 
     // On Windows, select the appropriate GUI wizard

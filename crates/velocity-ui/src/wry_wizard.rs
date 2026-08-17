@@ -88,14 +88,37 @@ enum JsMessage {
     GetState,
 }
 
+/// Messages from the installation background thread to the event loop.
+enum InstallThreadMsg {
+    Progress(u32, String),
+    Completed,
+    Error(String),
+}
+
 /// Run the cross-platform wry+tao wizard on Linux/macOS.
 ///
 /// Creates a native window with a WebView that renders the same modern
 /// wizard HTML as the Windows WebView2 wizard. An IPC shim layer ensures
 /// the JavaScript works identically across both backends.
-pub fn run_wry_wizard(
+///
+/// When `install_fn` and `payload_data` are provided, the wizard runs
+/// the installation in a background thread and shows real progress.
+pub fn run_wry_wizard<F, E>(
     manifest: &VelocityManifest,
-) -> std::result::Result<InstallWizardResult, UiError> {
+    payload_data: Option<Vec<u8>>,
+    install_fn: Option<F>,
+) -> std::result::Result<InstallWizardResult, UiError>
+where
+    F: Fn(
+            &VelocityManifest,
+            &std::path::Path,
+            &[u8],
+            fn(u32, String),
+        ) -> std::result::Result<(), E>
+        + Send
+        + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
     info!(
         "Starting wry+tao wizard for {} v{}",
         manifest.app.name, manifest.app.version
@@ -204,9 +227,10 @@ pub fn run_wry_wizard(
         .with_ipc_handler({
             let state = state.clone();
             let browse_tx = browse_tx.clone();
+            let install_req_tx = install_req_tx.clone();
             move |request| {
                 let json = request.body().clone();
-                handle_ipc_message(&state, &json, &browse_tx);
+                handle_ipc_message(&state, &json, &browse_tx, &install_req_tx);
             }
         })
         .build(&window)
@@ -214,6 +238,11 @@ pub fn run_wry_wizard(
 
     // Keep webview alive for the event loop
     let webview = Arc::new(Mutex::new(webview));
+
+    // Channel for progress updates from the installation background thread
+    let (progress_tx, progress_rx) = mpsc::channel::<InstallThreadMsg>();
+    // Channel for install requests from IPC handler to event loop
+    let (install_req_tx, install_req_rx) = mpsc::channel::<()>();
 
     // Send initial state to JS once the page loads
     {
@@ -231,6 +260,9 @@ pub fn run_wry_wizard(
     // Run the event loop (returns when window is closed)
     let state_close = state.clone();
     let webview_close = webview.clone();
+    let mut installing = false;
+    let mut install_thread: Option<std::thread::JoinHandle<()>> = None;
+    let state_install = state.clone();
     event_loop.run_return(move |event, _target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -239,6 +271,37 @@ pub fn run_wry_wizard(
         {
             while gtk::events_pending() {
                 gtk::main_iteration();
+            }
+        }
+
+        // Process progress updates from the installation background thread
+        while let Ok(msg) = progress_rx.try_recv() {
+            match msg {
+                InstallThreadMsg::Progress(pct, file) => {
+                    if let Ok(mut st) = state_close.lock() {
+                        st.progress_percent = pct;
+                        st.progress_file = file;
+                    }
+                    push_state_to_webview(&state_close, &webview_close);
+                }
+                InstallThreadMsg::Completed => {
+                    installing = false;
+                    if let Ok(mut st) = state_close.lock() {
+                        st.progress_percent = 100;
+                        st.progress_file = "Installation complete".to_string();
+                        st.page = "finish".to_string();
+                    }
+                    push_state_to_webview(&state_close, &webview_close);
+                }
+                InstallThreadMsg::Error(e) => {
+                    installing = false;
+                    error!("Installation failed: {}", e);
+                    if let Ok(mut st) = state_close.lock() {
+                        st.progress_file = format!("Error: {}", e);
+                        st.page = "finish".to_string();
+                    }
+                    push_state_to_webview(&state_close, &webview_close);
+                }
             }
         }
 
@@ -259,11 +322,58 @@ pub fn run_wry_wizard(
             }
         }
 
+        // Process install requests from the IPC handler
+        if let Ok(()) = install_req_rx.try_recv() {
+            if let (Some(payload), Some(install_fn)) = (payload_data.take(), install_fn.take()) {
+                installing = true;
+                let tx = progress_tx.clone();
+                let install_dir = state_install
+                    .lock()
+                    .map(|s| s.install_dir.clone())
+                    .unwrap_or_default();
+                let manifest_clone = manifest.clone();
+                let handle = std::thread::spawn(move || {
+                    let progress_cb: fn(u32, String) = {
+                        let tx = tx.clone();
+                        move |pct, msg| {
+                            let _ = tx.send(InstallThreadMsg::Progress(pct, msg));
+                        }
+                    };
+                    match install_fn(
+                        &manifest_clone,
+                        &std::path::PathBuf::from(&install_dir),
+                        &payload,
+                        progress_cb,
+                    ) {
+                        Ok(()) => {
+                            let _ = tx.send(InstallThreadMsg::Completed);
+                        }
+                        Err(e) => {
+                            let _ = tx.send(InstallThreadMsg::Error(format!("{}", e)));
+                        }
+                    }
+                });
+                install_thread = Some(handle);
+            } else {
+                // No install function — skip to finish
+                if let Ok(mut st) = state_close.lock() {
+                    st.progress_percent = 100;
+                    st.progress_file = "Installation complete".to_string();
+                    st.page = "finish".to_string();
+                }
+                push_state_to_webview(&state_close, &webview_close);
+            }
+        }
+
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
+                if installing {
+                    // Don't allow closing during installation
+                    return;
+                }
                 let mut st = state_close.lock().unwrap();
                 st.cancelled = true;
                 *control_flow = ControlFlow::ExitWithCode(0);
@@ -272,18 +382,41 @@ pub fn run_wry_wizard(
         }
     });
 
+    // Wait for install thread to finish (should already be done at this point)
+    if let Some(handle) = install_thread {
+        let _ = handle.join();
+    }
+
     // Extract result from shared state
     let final_state = state
         .lock()
         .map_err(|_| UiError::Wizard("Lock poisoned".into()))?;
+
+    // Determine if installation completed successfully
+    let install_completed = !final_state.cancelled
+        && final_state.progress_percent == 100
+        && !final_state.progress_file.starts_with("Error");
 
     Ok(InstallWizardResult {
         install_dir: PathBuf::from(&final_state.install_dir),
         cancelled: final_state.cancelled,
         launch_after: final_state.launch_after,
         selected_components: final_state.selected_components.clone(),
-        install_completed: false,
+        install_completed,
     })
+}
+
+/// Push the current wizard state to the JavaScript frontend.
+fn push_state_to_webview(state: &Arc<Mutex<WizardState>>, webview: &Arc<Mutex<wry::WebView>>) {
+    if let (Ok(st), Ok(wv)) = (state.lock(), webview.lock()) {
+        if let Ok(state_json) = serde_json::to_string(&*st) {
+            let script = format!(
+                "if(window.__velocityState)window.__velocityState({})",
+                state_json
+            );
+            let _ = wv.evaluate_script(&script);
+        }
+    }
 }
 
 /// Inject the cross-platform IPC compatibility shim into the HTML.
@@ -323,7 +456,12 @@ function onMsg(fn) { window.__velocityHandler = fn; }
 }
 
 /// Handle an IPC message from JavaScript.
-fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str, browse_tx: &mpsc::Sender<()>) {
+fn handle_ipc_message(
+    state: &Arc<Mutex<WizardState>>,
+    json: &str,
+    browse_tx: &mpsc::Sender<()>,
+    install_req_tx: &mpsc::Sender<()>,
+) {
     let msg: std::result::Result<JsMessage, _> = serde_json::from_str(json);
     match msg {
         Ok(JsMessage::Ready) => {
@@ -373,9 +511,10 @@ fn handle_ipc_message(state: &Arc<Mutex<WizardState>>, json: &str, browse_tx: &m
                 Err(_) => return,
             };
             st.page = "progress".to_string();
-            st.progress_percent = 100;
-            st.progress_file = "Installation complete".to_string();
-            st.page = "finish".to_string();
+            st.progress_percent = 0;
+            st.progress_file = "Preparing installation...".to_string();
+            // Forward install request to event loop for thread spawning
+            let _ = install_req_tx.send(());
         }
         Ok(JsMessage::Cancel) => {
             let mut st = match state.lock() {

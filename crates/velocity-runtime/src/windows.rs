@@ -211,10 +211,16 @@ pub(super) fn run() -> Result<()> {
             info!("Overriding UI theme to 'webview' (--modern flag)");
             effective_manifest.ui.theme = "webview".to_string();
         }
-        match velocity_ui::run_install_wizard_with_payload(
-            &effective_manifest,
-            Some(payload_data.clone()),
-        ) {
+        match velocity_ui::run_install_wizard_with_payload::<
+            fn(
+                &velocity_config::VelocityManifest,
+                &std::path::Path,
+                &[u8],
+                fn(u32, String),
+            ) -> std::result::Result<(), anyhow::Error>,
+            anyhow::Error,
+        >(&effective_manifest, Some(payload_data.clone()), None)
+        {
             Ok(result) => result,
             Err(velocity_ui::UiError::Cancelled) => {
                 info!("Installation cancelled by user");
