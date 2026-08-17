@@ -304,7 +304,6 @@ impl WasmPlugin {
     }
 
     /// Call a WASM export with context + error string parameters.
-    #[allow(dead_code)]
     fn call_hook_with_error(
         &mut self,
         name: &str,
@@ -364,56 +363,74 @@ impl VelocityPlugin for WasmPlugin {
         self.call_hook("on_load", &ctx_json)
     }
 
-    fn on_pre_install(&self, _ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+    fn on_pre_install(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log("debug", "plugin: on_pre_install");
-        // Note: call_hook needs &mut self, but the trait takes &self.
-        // For WASM plugins, we use interior mutability through the store.
-        // This is a design limitation — see the plugin loader docs.
-        Ok(())
+        self.call_hook("on_pre_install", &ctx_json)
     }
 
     fn on_file_extracted(
-        &self,
-        _ctx: &PluginContext,
+        &mut self,
+        ctx: &PluginContext,
         host: &dyn HostApi,
         file_path: &str,
     ) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log(
             "debug",
             &format!("plugin: on_file_extracted({})", file_path),
         );
-        Ok(())
+        self.call_hook("on_file_extracted", &ctx_json)
     }
 
-    fn on_post_install(&self, _ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+    fn on_post_install(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log("debug", "plugin: on_post_install");
-        Ok(())
+        self.call_hook("on_post_install", &ctx_json)
     }
 
-    fn on_pre_uninstall(&self, _ctx: &PluginContext, _host: &dyn HostApi) -> PluginResult<()> {
-        Ok(())
+    fn on_pre_uninstall(&mut self, ctx: &PluginContext, _host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
+        self.call_hook("on_pre_uninstall", &ctx_json)
     }
 
-    fn on_post_uninstall(&self, _ctx: &PluginContext, _host: &dyn HostApi) -> PluginResult<()> {
-        Ok(())
+    fn on_post_uninstall(&mut self, ctx: &PluginContext, _host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
+        self.call_hook("on_post_uninstall", &ctx_json)
     }
 
-    fn on_error(&self, _ctx: &PluginContext, host: &dyn HostApi, error: &str) -> PluginResult<()> {
+    fn on_error(
+        &mut self,
+        ctx: &PluginContext,
+        host: &dyn HostApi,
+        error: &str,
+    ) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log("error", &format!("plugin error hook: {}", error));
-        Ok(())
+        self.call_hook_with_error("on_error", &ctx_json, error)
     }
 
-    fn on_cancel(&self, _ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+    fn on_cancel(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log("warn", "plugin: installation cancelled");
-        Ok(())
+        self.call_hook("on_cancel", &ctx_json)
     }
 
-    fn on_unload(&self, _ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+    fn on_unload(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()> {
+        let ctx_json = serde_json::to_string(ctx)
+            .map_err(|e| PluginError::new("SERDE_ERROR", e.to_string()))?;
         host.log(
             "info",
             &format!("Unloading plugin '{}'", self.manifest.name),
         );
-        Ok(())
+        self.call_hook("on_unload", &ctx_json)
     }
 }
 

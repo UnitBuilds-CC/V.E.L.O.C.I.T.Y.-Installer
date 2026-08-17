@@ -387,7 +387,7 @@ fn run_wizard_window(
             win_h,
             None,
             None,
-            hi,
+            Some(hi),
             Some(data_ptr as *mut _),
         );
 
@@ -510,7 +510,7 @@ unsafe extern "system" fn wizard_wnd_proc(
                     let mw = wn(&d.strings.msg_confirm_cancel);
                     let tw = wn(&d.app_name);
                     let r = MessageBoxW(
-                        hwnd,
+                        Some(hwnd),
                         PCWSTR(mw.as_ptr()),
                         PCWSTR(tw.as_ptr()),
                         MB_YESNO | MB_ICONQUESTION,
@@ -542,7 +542,12 @@ unsafe extern "system" fn wizard_wnd_proc(
                         .progress_pct
                         .load(std::sync::atomic::Ordering::Relaxed);
                     // Update progress bar
-                    let _ = SendMessageW(d.h_progress, PBM_SETPOS, WPARAM(pct as usize), LPARAM(0));
+                    let _ = SendMessageW(
+                        d.h_progress,
+                        PBM_SETPOS,
+                        Some(WPARAM(pct as usize)),
+                        Some(LPARAM(0)),
+                    );
                     // Update file label
                     if let Ok(file) = state.current_file.lock() {
                         if !file.is_empty() {
@@ -560,14 +565,14 @@ unsafe extern "system" fn wizard_wnd_proc(
                         .install_complete
                         .load(std::sync::atomic::Ordering::Relaxed)
                     {
-                        let _ = KillTimer(hwnd, TIMER_PROGRESS);
+                        let _ = KillTimer(Some(hwnd), TIMER_PROGRESS);
                         // Check for errors
                         let error = state.install_error.lock().ok().and_then(|e| e.clone());
                         if let Some(err_msg) = error {
                             let ew = wn(&format!("Installation failed:\n\n{}", err_msg));
                             let tw = wn("Installation Error");
                             let _ = MessageBoxW(
-                                hwnd,
+                                Some(hwnd),
                                 PCWSTR(ew.as_ptr()),
                                 PCWSTR(tw.as_ptr()),
                                 MB_OK | MB_ICONERROR,
@@ -610,9 +615,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         20,
         126,
         40,
-        parent,
-        HMENU(200usize as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(200usize as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -629,9 +634,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         65,
         126,
         20,
-        parent,
-        HMENU(201usize as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(201usize as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -646,9 +651,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         12,
         320,
         24,
-        parent,
-        HMENU(PAGE_TITLE_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(PAGE_TITLE_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -664,9 +669,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         38,
         320,
         20,
-        parent,
-        HMENU(PAGE_DESC_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(PAGE_DESC_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -682,9 +687,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         62,
         320,
         230,
-        parent,
-        HMENU(EDIT_LICENSE_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(EDIT_LICENSE_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -701,9 +706,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         80,
         240,
         24,
-        parent,
-        HMENU(EDIT_DIR_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(EDIT_DIR_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -718,9 +723,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         80,
         72,
         24,
-        parent,
-        HMENU(BTN_BROWSE as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(BTN_BROWSE as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -736,9 +741,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         62,
         320,
         210,
-        parent,
-        HMENU(LIST_COMPONENTS_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(LIST_COMPONENTS_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -748,14 +753,19 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         SendMessageW(
             d.h_components,
             LB_ADDSTRING,
-            WPARAM(0),
-            LPARAM(cw.as_ptr() as isize),
+            Some(WPARAM(0)),
+            Some(LPARAM(cw.as_ptr() as isize)),
         );
     }
     // Pre-select default components
     for (i, node) in d.all_components.iter().enumerate() {
         if node.selected {
-            SendMessageW(d.h_components, LB_SETSEL, WPARAM(1), LPARAM(i as isize));
+            SendMessageW(
+                d.h_components,
+                LB_SETSEL,
+                Some(WPARAM(1)),
+                Some(LPARAM(i as isize)),
+            );
         }
     }
 
@@ -779,9 +789,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         276,
         320,
         16,
-        parent,
-        HMENU(STATIC_SPACE_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(STATIC_SPACE_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -797,13 +807,18 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         100,
         320,
         24,
-        parent,
-        HMENU(PROGRESS_BAR_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(PROGRESS_BAR_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
-    SendMessageW(d.h_progress, PBM_SETRANGE32, WPARAM(0), LPARAM(100));
+    SendMessageW(
+        d.h_progress,
+        PBM_SETRANGE32,
+        Some(WPARAM(0)),
+        Some(LPARAM(100)),
+    );
 
     // File label (hidden)
     d.h_file_label = CreateWindowExW(
@@ -815,9 +830,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         130,
         320,
         16,
-        parent,
-        HMENU(STATIC_FILE_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(STATIC_FILE_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -833,9 +848,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         80,
         250,
         20,
-        parent,
-        HMENU(CHK_LAUNCH_ID as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(CHK_LAUNCH_ID as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -854,9 +869,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         320,
         80,
         28,
-        parent,
-        HMENU(BTN_BACK as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(BTN_BACK as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -870,9 +885,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         320,
         80,
         28,
-        parent,
-        HMENU(BTN_NEXT as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(BTN_NEXT as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -886,9 +901,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         320,
         80,
         28,
-        parent,
-        HMENU(BTN_CANCEL as *mut _),
-        hi,
+        Some(parent),
+        Some(HMENU(BTN_CANCEL as *mut _)),
+        Some(hi),
         None,
     )
     .unwrap_or_default();
@@ -988,7 +1003,7 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
             set_txt(d.h_launch_chk, &d.strings.finish_launch);
         }
     }
-    let _ = InvalidateRect(hwnd, None, true);
+    let _ = InvalidateRect(Some(hwnd), None, true);
 }
 
 unsafe fn show_c(h: HWND) {
@@ -1015,14 +1030,20 @@ unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
         }
         WizardPage::Components => {
             d.selected_components.clear();
-            let count = SendMessageW(d.h_components, LB_GETSELCOUNT, WPARAM(0), LPARAM(0)).0 as i32;
+            let count = SendMessageW(
+                d.h_components,
+                LB_GETSELCOUNT,
+                Some(WPARAM(0)),
+                Some(LPARAM(0)),
+            )
+            .0 as i32;
             if count > 0 {
                 let mut indices = vec![0i32; count as usize];
                 let got = SendMessageW(
                     d.h_components,
                     LB_GETSELITEMS,
-                    WPARAM(count as usize),
-                    LPARAM(indices.as_mut_ptr() as isize),
+                    Some(WPARAM(count as usize)),
+                    Some(LPARAM(indices.as_mut_ptr() as isize)),
                 )
                 .0 as i32;
                 let mut raw_ids: Vec<String> = Vec::new();
@@ -1061,7 +1082,12 @@ unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
             show_page(hwnd, d);
         }
         WizardPage::Finished => {
-            let chk = SendMessageW(d.h_launch_chk, BM_GETCHECK, WPARAM(0), LPARAM(0));
+            let chk = SendMessageW(
+                d.h_launch_chk,
+                BM_GETCHECK,
+                Some(WPARAM(0)),
+                Some(LPARAM(0)),
+            );
             d.launch_after = chk.0 == 1; // BST_CHECKED = 1
             let _ = DestroyWindow(hwnd);
         }
@@ -1098,7 +1124,7 @@ unsafe fn start_installation(hwnd: HWND, d: &mut WizardData, payload: Vec<u8>) {
     let _ = ShowWindow(d.h_next, SW_HIDE);
 
     // Set timer for progress updates (100ms interval)
-    let _ = SetTimer(hwnd, TIMER_PROGRESS, 100, None);
+    let _ = SetTimer(Some(hwnd), TIMER_PROGRESS, 100, None);
 
     // Spawn extraction thread
     std::thread::spawn(move || {
@@ -1166,9 +1192,9 @@ unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {
 
     if !d.h_sidebar_bmp.0.is_null() {
         // Draw sidebar bitmap image
-        let mem_dc = CreateCompatibleDC(hdc);
-        let old_bmp = SelectObject(mem_dc, d.h_sidebar_bmp);
-        let _ = BitBlt(hdc, 0, 0, 150, 380, mem_dc, 0, 0, SRCCOPY);
+        let mem_dc = CreateCompatibleDC(Some(hdc));
+        let old_bmp = SelectObject(mem_dc, d.h_sidebar_bmp.into());
+        let _ = BitBlt(hdc, 0, 0, 150, 380, Some(mem_dc), 0, 0, SRCCOPY);
         let _ = SelectObject(mem_dc, old_bmp);
         let _ = DeleteDC(mem_dc);
     } else {
@@ -1177,7 +1203,7 @@ unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {
         let color = COLORREF(rgb[0] as u32 | (rgb[1] as u32) << 8 | (rgb[2] as u32) << 16);
         let brush = CreateSolidBrush(color);
         let _ = FillRect(hdc, &rect, brush);
-        let _ = DeleteObject(brush);
+        let _ = DeleteObject(brush.into());
     }
 
     SetTextColor(hdc, COLORREF(0x00FFFFFF));
@@ -1205,7 +1231,7 @@ unsafe fn browse_directory(parent: HWND, app_name: &str) -> Option<String> {
         .ok()?;
     let tw = wn(&format!("Select installation directory for {}", app_name));
     dialog.SetTitle(PCWSTR(tw.as_ptr())).ok()?;
-    match dialog.Show(parent) {
+    match dialog.Show(Some(parent)) {
         Ok(()) => {
             let item = dialog.GetResult().ok()?;
             let path = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
@@ -1228,14 +1254,19 @@ unsafe fn set_font(hwnd: HWND, bold: bool) {
         0,
         0,
         0,
-        1, // DEFAULT_CHARSET
-        0, // OUT_DEFAULT_PRECIS
-        0, // CLIP_DEFAULT_PRECIS
-        0, // DEFAULT_QUALITY
-        0, // DEFAULT_PITCH | FF_DONTCARE
+        FONT_CHARSET(1),          // DEFAULT_CHARSET
+        FONT_OUTPUT_PRECISION(0), // OUT_DEFAULT_PRECIS
+        FONT_CLIP_PRECISION(0),   // CLIP_DEFAULT_PRECIS
+        FONT_QUALITY(0),          // DEFAULT_QUALITY
+        0,                        // DEFAULT_PITCH | FF_DONTCARE
         w!("Segoe UI"),
     );
-    let _ = SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    let _ = SendMessageW(
+        hwnd,
+        WM_SETFONT,
+        Some(WPARAM(font.0 as usize)),
+        Some(LPARAM(1)),
+    );
 }
 
 /// Create a console-based progress window.

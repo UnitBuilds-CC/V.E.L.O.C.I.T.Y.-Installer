@@ -185,11 +185,11 @@ fn detect_wow64() -> bool {
                 {
                     let is_wow64_fn: unsafe extern "system" fn(
                         windows::Win32::Foundation::HANDLE,
-                        *mut windows::Win32::Foundation::BOOL,
+                        *mut windows::core::BOOL,
                     )
-                        -> windows::Win32::Foundation::BOOL = std::mem::transmute(func);
+                        -> windows::core::BOOL = std::mem::transmute(func);
 
-                    let mut result = windows::Win32::Foundation::BOOL::from(false);
+                    let mut result = windows::core::BOOL::from(false);
                     let process = GetCurrentProcess();
                     if is_wow64_fn(process, &mut result).as_bool() {
                         return result.as_bool();

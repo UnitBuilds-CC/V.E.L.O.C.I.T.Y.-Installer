@@ -36,33 +36,38 @@ pub trait VelocityPlugin: Send + Sync {
     fn on_load(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called before installation begins. Return Err to abort.
-    fn on_pre_install(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_pre_install(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called after each file is extracted.
     fn on_file_extracted(
-        &self,
+        &mut self,
         ctx: &PluginContext,
         host: &dyn HostApi,
         file_path: &str,
     ) -> PluginResult<()>;
 
     /// Called after installation completes successfully.
-    fn on_post_install(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_post_install(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called before uninstallation begins.
-    fn on_pre_uninstall(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_pre_uninstall(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called after uninstallation completes.
-    fn on_post_uninstall(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_post_uninstall(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called when an error occurs during installation.
-    fn on_error(&self, ctx: &PluginContext, host: &dyn HostApi, error: &str) -> PluginResult<()>;
+    fn on_error(
+        &mut self,
+        ctx: &PluginContext,
+        host: &dyn HostApi,
+        error: &str,
+    ) -> PluginResult<()>;
 
     /// Called when the user cancels installation.
-    fn on_cancel(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_cancel(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 
     /// Called when the plugin is unloaded. Use for cleanup.
-    fn on_unload(&self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
+    fn on_unload(&mut self, ctx: &PluginContext, host: &dyn HostApi) -> PluginResult<()>;
 }
 
 /// Host API — functions the plugin can call back into the installer.

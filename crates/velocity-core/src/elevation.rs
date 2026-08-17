@@ -7,7 +7,6 @@ use tracing::{debug, info};
 
 /// Check if the current process is running with administrator privileges.
 pub fn is_admin() -> bool {
-    use windows::Win32::Foundation::*;
     use windows::Win32::Security::*;
 
     // SAFETY: Win32 SID API — AllocateAndInitializeSid allocates a SID that is
@@ -37,7 +36,7 @@ pub fn is_admin() -> bool {
             return false;
         }
 
-        let mut is_member: BOOL = BOOL(0);
+        let mut is_member: windows::core::BOOL = windows::core::BOOL(0);
         let result = CheckTokenMembership(None, admin_sid, &mut is_member);
 
         let _ = FreeSid(admin_sid);

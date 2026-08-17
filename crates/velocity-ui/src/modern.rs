@@ -11,7 +11,18 @@
 use crate::error::UiError;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use tracing::info;
+use tracing::{error, info, warn};
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::{
+    CoTaskMemPWSTR, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, WebMessageReceivedEventHandler,
+};
+use windows::core::*;
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::{self, HBRUSH};
+use windows::Win32::System::Com::*;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// Result from the modern wizard dialog.
 #[derive(Debug, Clone)]
@@ -158,13 +169,307 @@ fn detect_system_theme() -> String {
     }
 }
 
+/// Shared state between the Win32 window procedure and WebView2 callbacks.
+struct WebView2Shared {
+    state: Arc<Mutex<WizardState>>,
+    webview: Mutex<Option<ICoreWebView2>>,
+    controller: Mutex<Option<ICoreWebView2Controller>>,
+    #[allow(dead_code)]
+    done: std::sync::atomic::AtomicBool,
+    hwnd: Mutex<HWND>,
+}
+
+/// Custom window message sent when the wizard is complete.
+const WM_WIZARD_COMPLETE: u32 = WM_APP + 1;
+
 /// Run the Win32 window + WebView2 message loop.
+///
+/// Creates a real Win32 window hosting a WebView2 control. The WebView2
+/// environment and controller are created asynchronously; once ready, the
+/// wizard HTML is loaded and the JS↔Rust message channel is active.
+#[allow(clippy::arc_with_non_send_sync)]
 fn run_wizard_window(
     state: Arc<Mutex<WizardState>>,
 ) -> std::result::Result<ModernWizardResult, UiError> {
-    // For now, return a result based on the state.
-    // The full WebView2 window creation is implemented below.
-    let st = state
+    // Safety: COM must be initialized for WebView2
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
+    let shared = Arc::new(WebView2Shared {
+        state,
+        webview: Mutex::new(None),
+        controller: Mutex::new(None),
+        done: std::sync::atomic::AtomicBool::new(false),
+        hwnd: Mutex::new(HWND::default()),
+    });
+
+    // Generate HTML content
+    let theme = {
+        let st = shared
+            .state
+            .lock()
+            .map_err(|_| UiError::Wizard("Lock poisoned".into()))?;
+        st.theme.clone()
+    };
+    let html = generate_wizard_html(&theme);
+
+    // Create Win32 window
+    unsafe {
+        let hi = GetModuleHandleW(None).unwrap_or_default();
+        let class_name = w!("VelocityModernWizard");
+
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(modern_wnd_proc),
+            hInstance: hi.into(),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hbrBackground: HBRUSH::default(),
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+        let _ = RegisterClassExW(&wc);
+
+        let shared_ptr = Arc::into_raw(shared.clone());
+        let win_w = 800i32;
+        let win_h = 600i32;
+
+        let title_h = HSTRING::from(format!(
+            "{} - Setup",
+            shared
+                .state
+                .lock()
+                .map_err(|_| UiError::Wizard("Lock".into()))?
+                .app_name
+        ));
+
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            class_name,
+            &title_h,
+            WS_OVERLAPPEDWINDOW & !(WS_THICKFRAME | WS_MAXIMIZEBOX),
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            win_w,
+            win_h,
+            None,
+            None,
+            Some(hi.into()),
+            Some(shared_ptr as *mut _),
+        );
+
+        let hwnd = match hwnd {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = Arc::from_raw(shared_ptr);
+                return Err(UiError::WindowCreation(format!("{}", e)));
+            }
+        };
+
+        {
+            let mut h = shared.hwnd.lock().unwrap();
+            *h = hwnd;
+        }
+
+        let sw = GetSystemMetrics(SM_CXSCREEN);
+        let sh = GetSystemMetrics(SM_CYSCREEN);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            (sw - win_w) / 2,
+            (sh - win_h) / 2,
+            0,
+            0,
+            SWP_NOZORDER | SWP_NOSIZE,
+        );
+
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = Gdi::UpdateWindow(hwnd);
+
+        // Create WebView2 environment using wait_with_pump pattern
+        let environment = {
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            CreateCoreWebView2EnvironmentCompletedHandler::wait_for_async_operation(
+                Box::new(|environmentcreatedhandler| {
+                    CreateCoreWebView2Environment(&environmentcreatedhandler)
+                        .map_err(webview2_com::Error::WindowsError)
+                }),
+                Box::new(move |error_code, environment| {
+                    error_code?;
+                    tx.send(environment.ok_or_else(|| windows::core::Error::from(E_POINTER)))
+                        .expect("send environment");
+                    Ok(())
+                }),
+            )
+            .ok();
+
+            rx.recv().ok()
+        };
+
+        let environment = match environment {
+            Some(Ok(env)) => env,
+            Some(Err(e)) => {
+                error!("WebView2 environment creation failed: {}", e);
+                // Fall through to message loop — window will show but without WebView2
+                // The wizard will return default results
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).into() {
+                    if msg.message == WM_WIZARD_COMPLETE {
+                        break;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let st = shared
+                    .state
+                    .lock()
+                    .map_err(|_| UiError::Wizard("Lock".into()))?;
+                return Ok(ModernWizardResult {
+                    install_dir: std::path::PathBuf::from(&st.install_dir),
+                    cancelled: st.cancelled,
+                    launch_after: st.launch_after,
+                    selected_components: st.selected_components.clone(),
+                    install_completed: false,
+                });
+            }
+            None => {
+                error!("WebView2 environment channel closed");
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).into() {
+                    if msg.message == WM_WIZARD_COMPLETE {
+                        break;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let st = shared
+                    .state
+                    .lock()
+                    .map_err(|_| UiError::Wizard("Lock".into()))?;
+                return Ok(ModernWizardResult {
+                    install_dir: std::path::PathBuf::from(&st.install_dir),
+                    cancelled: st.cancelled,
+                    launch_after: st.launch_after,
+                    selected_components: st.selected_components.clone(),
+                    install_completed: false,
+                });
+            }
+        };
+
+        // Create WebView2 controller
+        let controller = {
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            CreateCoreWebView2ControllerCompletedHandler::wait_for_async_operation(
+                Box::new(move |handler| {
+                    environment
+                        .CreateCoreWebView2Controller(hwnd, &handler)
+                        .map_err(webview2_com::Error::WindowsError)
+                }),
+                Box::new(move |error_code, controller| {
+                    error_code?;
+                    tx.send(controller.ok_or_else(|| windows::core::Error::from(E_POINTER)))
+                        .expect("send controller");
+                    Ok(())
+                }),
+            )
+            .ok();
+
+            rx.recv().ok()
+        };
+
+        let controller = match controller {
+            Some(Ok(c)) => c,
+            _ => {
+                error!("WebView2 controller creation failed");
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).into() {
+                    if msg.message == WM_WIZARD_COMPLETE {
+                        break;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let st = shared
+                    .state
+                    .lock()
+                    .map_err(|_| UiError::Wizard("Lock".into()))?;
+                return Ok(ModernWizardResult {
+                    install_dir: std::path::PathBuf::from(&st.install_dir),
+                    cancelled: st.cancelled,
+                    launch_after: st.launch_after,
+                    selected_components: st.selected_components.clone(),
+                    install_completed: false,
+                });
+            }
+        };
+
+        // Store controller
+        {
+            let mut ctrl = shared.controller.lock().unwrap();
+            *ctrl = Some(controller.clone());
+        }
+
+        // Get the CoreWebView2
+        let webview = controller.CoreWebView2();
+        if let Ok(ref wv) = webview {
+            // Store webview reference
+            {
+                let mut wv_store = shared.webview.lock().unwrap();
+                *wv_store = Some(wv.clone());
+            }
+
+            // Set up WebMessageReceived handler
+            let shared_for_msg = shared.clone();
+            let mut _token = 0;
+            let _ = wv.add_WebMessageReceived(
+                &WebMessageReceivedEventHandler::create(Box::new(move |_webview, args| {
+                    if let Some(args) = args {
+                        let mut message = PWSTR(std::ptr::null_mut());
+                        if args.WebMessageAsJson(&mut message).is_ok() {
+                            let msg_str = message.to_string().unwrap_or_default();
+                            handle_js_message(&shared_for_msg, &msg_str);
+                        }
+                    }
+                    Ok(())
+                })),
+                &mut _token,
+            );
+
+            // Navigate to the wizard HTML
+            let html_pcwstr = CoTaskMemPWSTR::from(html.as_str());
+            let _ = wv.Navigate(*html_pcwstr.as_ref().as_pcwstr());
+        }
+
+        // Make WebView2 fill the entire window
+        let _ = controller.SetBounds(RECT {
+            left: 0,
+            top: 0,
+            right: win_w,
+            bottom: win_h,
+        });
+        let _ = controller.SetIsVisible(true);
+
+        info!("WebView2 initialized and ready");
+
+        // Run the Win32 message loop
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).into() {
+            if msg.message == WM_WIZARD_COMPLETE {
+                break;
+            }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    // The shared Arc is still valid here — the window's Arc was recovered in WM_DESTROY.
+    // Our local clone (shared) is still alive.
+
+    let st = shared
+        .state
         .lock()
         .map_err(|_| UiError::Wizard("Lock poisoned".into()))?;
 
@@ -175,6 +480,227 @@ fn run_wizard_window(
         selected_components: st.selected_components.clone(),
         install_completed: false,
     })
+}
+
+/// Handle a JSON message received from JavaScript.
+fn handle_js_message(shared: &Arc<WebView2Shared>, json: &str) {
+    let msg: std::result::Result<JsMessage, _> = serde_json::from_str(json);
+    match msg {
+        Ok(JsMessage::Ready) => {
+            // Send initial state to JS
+            send_state_to_js(shared);
+        }
+        Ok(JsMessage::Next) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let pages = [
+                "welcome",
+                "license",
+                "directory",
+                "components",
+                "progress",
+                "finish",
+            ];
+            if let Some(idx) = pages.iter().position(|p| *p == st.page) {
+                if idx + 1 < pages.len() {
+                    st.page = pages[idx + 1].to_string();
+                }
+            }
+            send_state_to_js(shared);
+        }
+        Ok(JsMessage::Back) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let pages = [
+                "welcome",
+                "license",
+                "directory",
+                "components",
+                "progress",
+                "finish",
+            ];
+            if let Some(idx) = pages.iter().position(|p| *p == st.page) {
+                if idx > 0 {
+                    st.page = pages[idx - 1].to_string();
+                }
+            }
+            send_state_to_js(shared);
+        }
+        Ok(JsMessage::Install) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            st.page = "progress".to_string();
+            // Simulate installation progress (in real use, the runtime drives this)
+            st.progress_percent = 100;
+            st.progress_file = "Installation complete".to_string();
+            st.install_dir = st.install_dir.clone();
+            send_state_to_js(shared);
+            // Navigate to finish page after a brief delay
+            st.page = "finish".to_string();
+            send_state_to_js(shared);
+        }
+        Ok(JsMessage::Cancel) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            st.cancelled = true;
+            close_wizard_window(shared);
+        }
+        Ok(JsMessage::Browse) => {
+            // In a full implementation, this would open a folder browser dialog
+            info!("Browse button clicked (folder browser not yet implemented in WebView2 wizard)");
+        }
+        Ok(JsMessage::SetDir(dir)) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            st.install_dir = dir.clone();
+            // Send updated dir back to JS
+            if let Ok(wv) = shared.webview.lock() {
+                if let Some(ref webview) = *wv {
+                    let script = format!(
+                        "chrome.webview.postMessage({{type:'set_dir',data:'{}'}})",
+                        dir.replace('\\', "\\\\").replace('\'', "\\'")
+                    );
+                    unsafe {
+                        let _ = webview.ExecuteScript(
+                            *CoTaskMemPWSTR::from(script.as_str()).as_ref().as_pcwstr(),
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(JsMessage::ToggleComponent(id)) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            // Find the component and toggle its selection
+            if let Some(comp) = st.components.iter_mut().find(|c| c.id == id) {
+                if !comp.mandatory {
+                    comp.selected = !comp.selected;
+                }
+            }
+            // Update selected_components list
+            st.selected_components = st
+                .components
+                .iter()
+                .filter(|c| c.selected)
+                .map(|c| c.id.clone())
+                .collect();
+            send_state_to_js(shared);
+        }
+        Ok(JsMessage::Finish { launch }) => {
+            let mut st = match shared.state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            st.launch_after = launch;
+            close_wizard_window(shared);
+        }
+        Ok(JsMessage::GetState) => {
+            send_state_to_js(shared);
+        }
+        Err(e) => {
+            warn!("Failed to parse JS message: {} (json: {})", e, json);
+        }
+    }
+}
+
+/// Send the current wizard state to JavaScript via ExecuteScript.
+fn send_state_to_js(shared: &Arc<WebView2Shared>) {
+    let st = match shared.state.lock() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let state_json = match serde_json::to_string(&*st) {
+        Ok(j) => j,
+        Err(e) => {
+            warn!("Failed to serialize wizard state: {}", e);
+            return;
+        }
+    };
+    let script = format!(
+        "chrome.webview.postMessage({{type:'state',data:{}}})",
+        state_json
+    );
+    if let Ok(wv) = shared.webview.lock() {
+        if let Some(ref webview) = *wv {
+            let script_pwstr = CoTaskMemPWSTR::from(script.as_str());
+            unsafe {
+                let _ = webview.ExecuteScript(*script_pwstr.as_ref().as_pcwstr(), None);
+            }
+        }
+    }
+}
+
+/// Close the wizard window, ending the message loop.
+fn close_wizard_window(shared: &Arc<WebView2Shared>) {
+    if let Ok(hwnd) = shared.hwnd.lock() {
+        if !hwnd.is_invalid() {
+            unsafe {
+                let _ = PostMessageW(Some(*hwnd), WM_WIZARD_COMPLETE, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+}
+
+/// Win32 window procedure for the modern wizard window.
+unsafe extern "system" fn modern_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_CREATE => {
+            let cs = &*(lparam.0 as *const CREATESTRUCTW);
+            let shared_ptr = cs.lpCreateParams as *const WebView2Shared;
+            if !shared_ptr.is_null() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, shared_ptr as isize);
+            }
+            LRESULT(0)
+        }
+        WM_SIZE => {
+            // Resize WebView2 to fill the window
+            let shared_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WebView2Shared;
+            if !shared_ptr.is_null() {
+                let shared = &*shared_ptr;
+                let cx = (lparam.0 & 0xFFFF) as i32;
+                let cy = ((lparam.0 >> 16) & 0xFFFF) as i32;
+                if let Ok(ctrl) = shared.controller.lock() {
+                    if let Some(ref controller) = *ctrl {
+                        let _ = controller.SetBounds(RECT {
+                            left: 0,
+                            top: 0,
+                            right: cx,
+                            bottom: cy,
+                        });
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            // Recover the Arc we stored via into_raw
+            let shared_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WebView2Shared;
+            if !shared_ptr.is_null() {
+                let _ = Arc::from_raw(shared_ptr);
+            }
+            PostQuitMessage(0);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
 }
 
 /// Generate the complete HTML content for the wizard.
