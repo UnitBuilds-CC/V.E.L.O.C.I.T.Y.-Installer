@@ -491,7 +491,7 @@ fn download_with_winhttp(
 fn sanitize_filename(name: &str) -> String {
     // Take only the last path component to prevent directory traversal
     let basename = name
-        .rsplit(|c: char| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(name);
 
@@ -523,15 +523,15 @@ fn sanitize_filename(name: &str) -> String {
 /// Parse a URL into (host, port, path, is_https).
 /// Handles IPv6 addresses in bracket notation (e.g., `http://[::1]:8080/path`).
 fn parse_url(url: &str) -> Result<(String, u16, String, bool)> {
-    let (scheme, rest) = if url.starts_with("https://") {
-        ("https://", &url[8..])
-    } else if url.starts_with("http://") {
-        ("http://", &url[7..])
+    let (scheme, rest) = if let Some(rest) = url.strip_prefix("https://") {
+        ("https", rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        ("http", rest)
     } else {
         return Err(CoreError::other("URL parsing", format!("Unsupported URL scheme: {}", url)));
     };
 
-    let is_https = scheme == "https://";
+    let is_https = scheme == "https";
     let default_port: u16 = if is_https { 443 } else { 80 };
 
     // Split host and path
@@ -547,8 +547,7 @@ fn parse_url(url: &str) -> Result<(String, u16, String, bool)> {
             Some(bracket_end) => {
                 let ipv6_host = &host_port[..=bracket_end];
                 let after_bracket = &host_port[bracket_end + 1..];
-                if after_bracket.starts_with(':') {
-                    let port_str = &after_bracket[1..];
+                if let Some(port_str) = after_bracket.strip_prefix(':') {
                     match port_str.parse::<u16>() {
                         Ok(p) => (ipv6_host, p),
                         Err(_) => (ipv6_host, default_port),

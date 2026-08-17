@@ -171,6 +171,7 @@ impl Default for InstallConfig {
 
 /// File inclusion configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct FilesConfig {
     /// Glob pattern(s) for source files to include
     #[serde(default)]
@@ -186,16 +187,6 @@ pub struct FilesConfig {
     pub exclude: Vec<String>,
 }
 
-impl Default for FilesConfig {
-    fn default() -> Self {
-        Self {
-            source: Vec::new(),
-            base_dir: None,
-            mappings: Vec::new(),
-            exclude: Vec::new(),
-        }
-    }
-}
 
 /// Explicit source-to-destination file mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +199,7 @@ pub struct FileMapping {
 
 /// Shortcut creation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ShortcutConfig {
     /// Create a desktop shortcut
     #[serde(default)]
@@ -223,16 +215,6 @@ pub struct ShortcutConfig {
     pub custom: Vec<CustomShortcut>,
 }
 
-impl Default for ShortcutConfig {
-    fn default() -> Self {
-        Self {
-            desktop: false,
-            start_menu: false,
-            quick_launch: false,
-            custom: Vec::new(),
-        }
-    }
-}
 
 /// A custom shortcut definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,6 +355,7 @@ pub struct PageConfig {
 
 /// Pre/post install script configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ScriptsConfig {
     /// Commands to run before installation
     #[serde(default)]
@@ -388,16 +371,6 @@ pub struct ScriptsConfig {
     pub post_uninstall: Vec<String>,
 }
 
-impl Default for ScriptsConfig {
-    fn default() -> Self {
-        Self {
-            pre_install: Vec::new(),
-            post_install: Vec::new(),
-            pre_uninstall: Vec::new(),
-            post_uninstall: Vec::new(),
-        }
-    }
-}
 
 /// Environment variable to set during installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

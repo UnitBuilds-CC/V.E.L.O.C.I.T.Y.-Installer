@@ -59,7 +59,7 @@ pub fn encrypt(data: &[u8], password: &str) -> Vec<u8> {
 
     // Compute key verifier: SHA256(key || "velocity_verifier")
     let mut verifier_hash = Sha256::new();
-    verifier_hash.update(&key_bytes);
+    verifier_hash.update(key_bytes);
     verifier_hash.update(b"velocity_verifier");
     let key_verifier = verifier_hash.finalize();
 
@@ -111,7 +111,7 @@ pub fn decrypt(data: &[u8], password: &str) -> Option<Vec<u8>> {
 
     // Verify password via key verifier
     let mut verifier_hash = Sha256::new();
-    verifier_hash.update(&key_bytes);
+    verifier_hash.update(key_bytes);
     verifier_hash.update(b"velocity_verifier");
     let computed_verifier = verifier_hash.finalize();
 
@@ -190,7 +190,7 @@ fn generate_nonce() -> [u8; NONCE_SIZE] {
     nonce[..8].copy_from_slice(&time_bytes[..8]);
     // Fill remaining 4 bytes with a hash of the time
     let mut h = Sha256::new();
-    h.update(&time_bytes);
+    h.update(time_bytes);
     let hash = h.finalize();
     nonce[8..12].copy_from_slice(&hash[..4]);
 

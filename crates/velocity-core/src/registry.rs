@@ -98,6 +98,7 @@ fn remove_registry_entry(entry: &RegistryEntry) -> Result<()> {
 }
 
 /// Write the Add/Remove Programs entry for the uninstaller.
+#[allow(clippy::too_many_arguments)]
 pub fn write_uninstall_entry(
     app_name: &str,
     install_dir: &str,

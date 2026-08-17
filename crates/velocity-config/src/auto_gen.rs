@@ -231,7 +231,7 @@ pub fn collect_files(manifest: &VelocityManifest, base_dir: &Path) -> Result<Vec
             search_base.join(pattern).to_string_lossy().to_string()
         };
 
-        let paths = glob::glob(&full_pattern).map_err(|e| ConfigError::GlobError(e))?;
+        let paths = glob::glob(&full_pattern).map_err(ConfigError::GlobError)?;
 
         for entry in paths {
             match entry {

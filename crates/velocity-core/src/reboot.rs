@@ -34,10 +34,7 @@ pub fn is_reboot_pending() -> bool {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok(key) = hklm.open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager") {
         // Check for PendingFileRenameOperations
-        match key.get_raw_value("PendingFileRenameOperations") {
-            Ok(_) => return true,
-            Err(_) => {}
-        }
+        if key.get_raw_value("PendingFileRenameOperations").is_ok() { return true }
 
         // Also check the RebootRequired flag
         if let Ok(flag) = key.get_value::<u32, _>("RebootRequired") {
@@ -245,10 +242,7 @@ pub fn is_file_locked(path: &Path) -> bool {
     }
 
     // Try to open the file with exclusive access
-    match std::fs::OpenOptions::new().write(true).open(path) {
-        Ok(_) => false,
-        Err(_) => true,
-    }
+    std::fs::OpenOptions::new().write(true).open(path).is_err()
 }
 
 /// Check if any files in a list are locked.

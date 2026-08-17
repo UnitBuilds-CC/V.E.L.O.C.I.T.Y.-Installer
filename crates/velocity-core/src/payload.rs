@@ -94,11 +94,7 @@ pub fn read_payload(exe_path: &Path) -> Result<(Vec<u8>, Vec<u8>)> {
 /// Find the payload marker by scanning backwards from the end of the file.
 fn find_marker(file: &mut std::fs::File, file_len: u64) -> Result<u64> {
     // The marker should be near the end. Search the last 256KB at most.
-    let search_start = if file_len > 262144 {
-        file_len - 262144
-    } else {
-        0
-    };
+    let search_start = file_len.saturating_sub(262144);
 
     let mut buf = vec![0u8; (file_len - search_start) as usize];
     file.seek(SeekFrom::Start(search_start))?;

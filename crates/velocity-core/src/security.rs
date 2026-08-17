@@ -232,8 +232,10 @@ fn sanitize_component(name: &str) -> String {
 /// Restrict directory ACLs to current user + administrators (Windows only).
 ///
 /// Uses `icacls` to set a restrictive DACL that grants Full Control only to:
+///
 /// - The current user (owner)
 /// - The Administrators group
+///
 /// All other inherited permissions are removed.
 #[cfg(target_os = "windows")]
 fn restrict_directory_acl(path: &Path) -> Result<()> {

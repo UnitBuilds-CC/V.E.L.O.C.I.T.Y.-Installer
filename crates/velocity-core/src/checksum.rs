@@ -18,7 +18,7 @@ pub enum HashAlgorithm {
 
 impl HashAlgorithm {
     /// Parse from string (case-insensitive).
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "sha512" | "sha-512" => HashAlgorithm::Sha512,
             _ => HashAlgorithm::Sha256,
@@ -221,11 +221,11 @@ mod tests {
 
     #[test]
     fn test_hash_algorithm_from_str() {
-        assert_eq!(HashAlgorithm::from_str("sha256"), HashAlgorithm::Sha256);
-        assert_eq!(HashAlgorithm::from_str("SHA256"), HashAlgorithm::Sha256);
-        assert_eq!(HashAlgorithm::from_str("sha512"), HashAlgorithm::Sha512);
-        assert_eq!(HashAlgorithm::from_str("SHA-512"), HashAlgorithm::Sha512);
-        assert_eq!(HashAlgorithm::from_str("unknown"), HashAlgorithm::Sha256);
+        assert_eq!(HashAlgorithm::parse("sha256"), HashAlgorithm::Sha256);
+        assert_eq!(HashAlgorithm::parse("SHA256"), HashAlgorithm::Sha256);
+        assert_eq!(HashAlgorithm::parse("sha512"), HashAlgorithm::Sha512);
+        assert_eq!(HashAlgorithm::parse("SHA-512"), HashAlgorithm::Sha512);
+        assert_eq!(HashAlgorithm::parse("unknown"), HashAlgorithm::Sha256);
     }
 
     #[test]

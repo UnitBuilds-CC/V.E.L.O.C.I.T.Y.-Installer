@@ -36,7 +36,7 @@ fn apply_env_var(entry: &EnvVarEntry) -> Result<()> {
                 )
                 .map_err(|e| CoreError::Registry(format!("Failed to open system env key: {}", e)))?
         }
-        "user" | _ => {
+        _ => {
             info!("Setting user env var: {} = {}", entry.name, entry.value);
             RegKey::predef(HKEY_CURRENT_USER)
                 .open_subkey_with_flags(
@@ -88,7 +88,7 @@ fn remove_env_var(entry: &EnvVarEntry) -> Result<()> {
                 winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
             )
             .map_err(|e| CoreError::Registry(format!("Failed to open system env key: {}", e)))?,
-        "user" | _ => RegKey::predef(HKEY_CURRENT_USER)
+        _ => RegKey::predef(HKEY_CURRENT_USER)
             .open_subkey_with_flags(
                 "Environment",
                 winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,

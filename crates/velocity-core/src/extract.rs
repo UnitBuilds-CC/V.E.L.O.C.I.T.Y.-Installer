@@ -12,18 +12,15 @@ use tracing::{debug, info, warn};
 
 /// Supported compression formats for the payload archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CompressionFormat {
     /// Zstandard — fast, good ratio (default)
+    #[default]
     Zstd,
     /// LZMA2 — slower, better ratio (Inno Setup compatible)
     Lzma2,
 }
 
-impl Default for CompressionFormat {
-    fn default() -> Self {
-        CompressionFormat::Zstd
-    }
-}
 
 impl CompressionFormat {
     /// Detect compression format from magic bytes.

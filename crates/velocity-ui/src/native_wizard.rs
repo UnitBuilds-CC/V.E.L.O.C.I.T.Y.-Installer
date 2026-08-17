@@ -51,6 +51,12 @@ pub struct WizardState {
     pub install_error: std::sync::Mutex<Option<String>>,
 }
 
+impl Default for WizardState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WizardState {
     pub fn new() -> Self {
         WizardState {
@@ -119,7 +125,7 @@ struct WizardStrings {
     btn_install: String,
     btn_finish: String,
     btn_cancel: String,
-    btn_browse: String,
+    _btn_browse: String,
     welcome_title: String,
     welcome_desc: String,
     license_title: String,
@@ -144,7 +150,7 @@ impl WizardStrings {
             btn_install: loc.get_simple("btn_install"),
             btn_finish: loc.get_simple("btn_finish"),
             btn_cancel: loc.get_simple("btn_cancel"),
-            btn_browse: loc.get_simple("btn_browse"),
+            _btn_browse: loc.get_simple("btn_browse"),
             welcome_title: loc.get("wizard_welcome_title", &[("app_name", app_name)]),
             welcome_desc: loc.get("wizard_welcome_body", &[("app_name", app_name), ("version", version)]),
             license_title: loc.get_simple("wizard_license_title"),
@@ -162,6 +168,7 @@ impl WizardStrings {
         }
     }
 
+    #[allow(dead_code)]
     fn english_defaults(app_name: &str, version: &str) -> Self {
         WizardStrings {
             btn_next: "&Next >".into(),
@@ -169,7 +176,7 @@ impl WizardStrings {
             btn_install: "&Install".into(),
             btn_finish: "&Finish".into(),
             btn_cancel: "Cancel".into(),
-            btn_browse: "&Browse...".into(),
+            _btn_browse: "&Browse...".into(),
             welcome_title: "Welcome".into(),
             welcome_desc: format!("This will install {} {} on your computer.\n\nClick Next to continue, or Cancel to exit.", app_name, version),
             license_title: "License Agreement".into(),
@@ -240,6 +247,7 @@ fn wn(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_wizard_window(
     app_name: &str, version: &str, default_dir: &str,
     has_license: bool, has_components: bool, license_text: &str,
@@ -298,7 +306,7 @@ fn run_wizard_window(
             lpfnWndProc: Some(wizard_wnd_proc),
             hInstance: hi,
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: HBRUSH((COLOR_BTNFACE.0 as i32 + 1) as *mut _),
+            hbrBackground: HBRUSH((COLOR_BTNFACE.0 + 1) as *mut _),
             lpszClassName: class_name,
             ..Default::default()
         };
@@ -711,8 +719,8 @@ unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
                     WPARAM(count as usize), LPARAM(indices.as_mut_ptr() as isize),
                 ).0 as i32;
                 let mut raw_ids: Vec<String> = Vec::new();
-                for i in 0..got as usize {
-                    let idx = indices[i] as usize;
+                for &idx in indices.iter().take(got as usize) {
+                    let idx = idx as usize;
                     if idx < d.all_components.len() {
                         raw_ids.push(d.all_components[idx].id.clone());
                     }
@@ -828,7 +836,7 @@ unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {
     let hdc = BeginPaint(hwnd, &mut ps);
     let rect = RECT { left: 0, top: 0, right: 150, bottom: 380 };
 
-    if d.h_sidebar_bmp.0 != std::ptr::null_mut() {
+    if !d.h_sidebar_bmp.0.is_null() {
         // Draw sidebar bitmap image
         let mem_dc = CreateCompatibleDC(hdc);
         let old_bmp = SelectObject(mem_dc, d.h_sidebar_bmp);
@@ -866,7 +874,7 @@ unsafe fn browse_directory(parent: HWND, app_name: &str) -> Option<String> {
             let item = dialog.GetResult().ok()?;
             let path = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
             let s = path.to_string().ok()?;
-            let _ = CoTaskMemFree(Some(path.0 as *mut _));
+            CoTaskMemFree(Some(path.0 as *mut _));
             Some(s)
         }
         Err(_) => None,
@@ -910,7 +918,7 @@ impl InstallProgressWindow {
             let bw = 40usize;
             let f = (percent as usize * bw) / 100;
             let e = bw - f;
-            let bar: String = std::iter::repeat('█').take(f).chain(std::iter::repeat('░').take(e)).collect();
+            let bar: String = std::iter::repeat_n('█', f).chain(std::iter::repeat_n('░', e)).collect();
             let dn = if file_name.len() > 35 { format!("...{}", &file_name[file_name.len()-32..]) } else { file_name.to_string() };
             print!("\r  [{}] {:3}%  {:<35}", bar, percent, dn);
             if percent >= 100 { println!(); }

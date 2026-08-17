@@ -144,7 +144,7 @@ impl ProgressTracker {
                 "Progress: [{}/{}] 100% - {} (completed in {}s)",
                 current, self.total_items, display_name, total_secs
             );
-        } else if current % 10 == 0 || current <= 5 {
+        } else if current.is_multiple_of(10) || current <= 5 {
             tracing::info!(
                 "Progress: [{}/{}] {}% - {} ETA: {}",
                 current, self.total_items, pct, display_name, eta_str
@@ -210,7 +210,7 @@ pub fn show_progress(current: usize, total: usize, file_name: &str) {
 }
 
 /// Show installation complete message.
-pub fn show_complete(app_name: &str, install_dir: &PathBuf) {
+pub fn show_complete(app_name: &str, install_dir: &std::path::Path) {
     classic::show_message(
         &format!("{} Installed", app_name),
         &format!(
@@ -227,7 +227,7 @@ pub fn show_error(title: &str, message: &str) {
 }
 
 /// Show the finish dialog with option to launch the app.
-pub fn show_finish(app_name: &str, install_dir: &PathBuf, run_after: Option<&str>) -> bool {
+pub fn show_finish(app_name: &str, install_dir: &std::path::Path, run_after: Option<&str>) -> bool {
     classic::show_finish_dialog(app_name, install_dir, run_after)
 }
 

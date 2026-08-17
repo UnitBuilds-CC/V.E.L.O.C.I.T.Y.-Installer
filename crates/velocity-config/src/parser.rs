@@ -40,7 +40,7 @@ fn validate_manifest(manifest: &VelocityManifest) -> Result<()> {
     }
 
     // App name must not contain path separators or null bytes
-    if manifest.app.name.contains(|c: char| c == '/' || c == '\\' || c == '\0') {
+    if manifest.app.name.contains(['/', '\\', '\0']) {
         return Err(ConfigError::Validation(format!(
             "App name '{}' must not contain path separators or null bytes",
             manifest.app.name

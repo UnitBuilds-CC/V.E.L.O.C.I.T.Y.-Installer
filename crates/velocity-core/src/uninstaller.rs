@@ -225,11 +225,7 @@ pub fn read_uninstall_info(exe_path: &Path) -> Result<UninstallInfo> {
 
     // Search the last 256KB for the marker (same as payload.rs)
     let marker = b"VELOCITY_UNINST_V1";
-    let search_start = if file_len > 262144 {
-        file_len - 262144
-    } else {
-        0
-    };
+    let search_start = file_len.saturating_sub(262144);
 
     let search_size = (file_len - search_start) as usize;
     let mut buf = vec![0u8; search_size];

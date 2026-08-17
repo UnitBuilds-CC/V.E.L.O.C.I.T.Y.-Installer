@@ -97,14 +97,16 @@ fn shell_execute_elevated(exe_path: &Path, args: &[String]) -> Result<bool> {
 
     let op: Vec<u16> = "runas\0".encode_utf16().collect();
 
-    let mut sei = SHELLEXECUTEINFOW::default();
-    sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-    sei.lpVerb = PCWSTR(op.as_ptr());
-    sei.lpFile = PCWSTR(file_wide.as_ptr());
-    sei.lpParameters = PCWSTR(args_wide.as_ptr());
-    sei.lpDirectory = PCWSTR(dir.as_ptr());
-    sei.nShow = SW_SHOWNORMAL.0 as i32;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    let mut sei = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        lpVerb: PCWSTR(op.as_ptr()),
+        lpFile: PCWSTR(file_wide.as_ptr()),
+        lpParameters: PCWSTR(args_wide.as_ptr()),
+        lpDirectory: PCWSTR(dir.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        ..Default::default()
+    };
 
     unsafe {
         match ShellExecuteExW(&mut sei) {

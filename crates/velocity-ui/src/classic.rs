@@ -255,8 +255,8 @@ impl ProgressHandle {
             self.last_percent = percent;
             let filled = (percent as usize) / 2;
             let empty = 50 - filled;
-            let bar: String = std::iter::repeat('█').take(filled)
-                .chain(std::iter::repeat('░').take(empty))
+            let bar: String = std::iter::repeat_n('█', filled)
+                .chain(std::iter::repeat_n('░', empty))
                 .collect();
             
             // Truncate filename if too long

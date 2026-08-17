@@ -23,6 +23,12 @@ pub struct ProgressState {
     pub current_file: Arc<std::sync::Mutex<String>>,
 }
 
+impl Default for ProgressState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProgressState {
     /// Create a new progress state.
     pub fn new() -> Self {
@@ -139,8 +145,8 @@ impl ProgressHandle {
         let filled = (percent as usize * bar_width) / 100;
         let empty = bar_width.saturating_sub(filled);
 
-        let bar: String = std::iter::repeat('█').take(filled)
-            .chain(std::iter::repeat('░').take(empty))
+        let bar: String = std::iter::repeat_n('█', filled)
+            .chain(std::iter::repeat_n('░', empty))
             .collect();
 
         // Truncate filename to fit
@@ -323,7 +329,7 @@ fn detect_system_language() -> String {
 
 /// Parse a language code from a locale string (e.g., "en-US" -> "en", "de_DE" -> "de").
 fn parse_language_code(locale: &str) -> String {
-    locale.split(|c: char| c == '-' || c == '_' || c == '.')
+    locale.split(['-', '_', '.'])
         .next()
         .unwrap_or("en")
         .to_lowercase()

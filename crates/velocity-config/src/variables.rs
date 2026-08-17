@@ -83,7 +83,7 @@ impl VariableResolver {
         }
 
         // {autopf64} — 64-bit Program Files
-        if let Some(pf64) = std::env::var("ProgramW6432").ok() {
+        if let Ok(pf64) = std::env::var("ProgramW6432") {
             vars.insert("autopf64".to_string(), pf64);
         } else {
             vars.insert(
@@ -93,7 +93,7 @@ impl VariableResolver {
         }
 
         // {autopf32} — 32-bit Program Files
-        if let Some(pf32) = std::env::var("ProgramFiles(x86)").ok() {
+        if let Ok(pf32) = std::env::var("ProgramFiles(x86)") {
             vars.insert("autopf32".to_string(), pf32);
         } else {
             vars.insert(
@@ -103,7 +103,7 @@ impl VariableResolver {
         }
 
         // {win} — Windows directory
-        if let Some(win) = std::env::var("WINDIR").ok() {
+        if let Ok(win) = std::env::var("WINDIR") {
             vars.insert("win".to_string(), win);
         } else {
             vars.insert("win".to_string(), "C:\\Windows".to_string());
@@ -121,12 +121,12 @@ impl VariableResolver {
         );
 
         // {home} — User home
-        if let Some(home) = std::env::var("USERPROFILE").ok() {
+        if let Ok(home) = std::env::var("USERPROFILE") {
             vars.insert("home".to_string(), home);
         }
 
         // {autodesktop} — Common Desktop
-        if let Some(desktop) = std::env::var("PUBLIC").ok() {
+        if let Ok(desktop) = std::env::var("PUBLIC") {
             vars.insert(
                 "autodesktop".to_string(),
                 format!("{}\\Desktop", desktop),
@@ -134,7 +134,7 @@ impl VariableResolver {
         }
 
         // {autostartmenu} — Common Start Menu
-        if let Some(program_data) = std::env::var("ProgramData").ok() {
+        if let Ok(program_data) = std::env::var("ProgramData") {
             vars.insert(
                 "autostartmenu".to_string(),
                 format!(

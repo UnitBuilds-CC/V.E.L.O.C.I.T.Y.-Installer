@@ -401,11 +401,11 @@ fn main() -> Result<()> {
     if manifest.install.verify_checksums {
         info!("Checksum verification enabled, verifying files...");
         logging::log_op("CHECKSUM", "Verifying file integrity...");
-        let algo = velocity_core::checksum::HashAlgorithm::from_str(&manifest.install.checksum_algo);
+        let algo = velocity_core::checksum::HashAlgorithm::parse(&manifest.install.checksum_algo);
         // Build checksum map from extracted files
         let mut checksum_map = std::collections::HashMap::new();
         for file_path in &extracted {
-            if let Ok(rel) = file_path.strip_prefix(&install_dir) {
+            if let Ok(rel) = file_path.strip_prefix(install_dir) {
                 let rel_str = rel.to_string_lossy().replace('\\', "/");
                 if let Ok(hash) = velocity_core::checksum::hash_file(file_path, algo) {
                     checksum_map.insert(rel_str, hash);
@@ -746,21 +746,17 @@ fn run_uninstall(exe_path: &std::path::Path, args: &RuntimeArgs) -> Result<()> {
     // Check for admin
     if !velocity_core::elevation::is_admin() {
         let cmd_args = vec!["--uninstall".to_string()];
-        match velocity_core::elevation::elevate_if_needed(&cmd_args)? {
-            true => return Ok(()),
-            false => {}
-        }
+        if velocity_core::elevation::elevate_if_needed(&cmd_args)? { return Ok(()) }
     }
 
     // Confirm uninstall (unless silent or force)
-    if !args.silent && !args.force {
-        if !velocity_ui::classic::show_confirm(
+    if !args.silent && !args.force
+        && !velocity_ui::classic::show_confirm(
             "Uninstall",
             "Are you sure you want to uninstall this application?",
         ) {
             return Ok(());
         }
-    }
 
     // Read uninstall info
     let uninstall_info = velocity_core::uninstaller::read_uninstall_info(exe_path)?;
