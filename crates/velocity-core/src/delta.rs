@@ -440,6 +440,53 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Save a delta package to a .delta.zip file.
+///
+/// The delta package is serialized as JSON and compressed with Zstd.
+pub fn save_delta_package(delta: &DeltaPackage, path: &Path) -> Result<()> {
+    info!("Saving delta package to {}", path.display());
+
+    // Serialize to JSON
+    let json = serde_json::to_string(delta).map_err(|e| CoreError::Other(e.to_string()))?;
+
+    // Compress with Zstd
+    let compressed = compress_with_zstd(json.as_bytes(), 9)?;
+
+    // Write to file
+    fs::write(path, &compressed)?;
+
+    info!(
+        "Delta package saved: {} bytes (compressed from {} bytes JSON)",
+        compressed.len(),
+        json.len()
+    );
+
+    Ok(())
+}
+
+/// Load a delta package from a .delta.zip file.
+pub fn load_delta_package(path: &Path) -> Result<DeltaPackage> {
+    info!("Loading delta package from {}", path.display());
+
+    // Read compressed file
+    let compressed = fs::read(path)?;
+
+    // Decompress with Zstd
+    let json_bytes = decompress_with_zstd(&compressed)?;
+
+    // Deserialize from JSON
+    let delta: DeltaPackage = serde_json::from_slice(&json_bytes).map_err(|e| CoreError::Other(e.to_string()))?;
+
+    info!(
+        "Delta package loaded: {} -> {}, {} patches",
+        delta.from_version,
+        delta.to_version,
+        delta.patches.len()
+    );
+
+    Ok(delta)
+}
+
 /// Rollback to backup directory on failure.
 fn rollback(target_dir: &Path, backup_dir: &Path) -> Result<()> {
     warn!("Rolling back to backup...");
@@ -705,5 +752,44 @@ mod tests {
             "new file"
         );
         assert!(!target_dir.join("deleted.txt").exists());
+    }
+
+    #[test]
+    fn test_delta_save_load_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let old_dir = temp.path().join("old");
+        let new_dir = temp.path().join("new");
+        let delta_path = temp.path().join("delta.delta.zip");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+
+        // Create test files
+        fs::write(old_dir.join("file.txt"), "old content").unwrap();
+        fs::write(new_dir.join("file.txt"), "new content").unwrap();
+
+        // Generate delta
+        let delta = generate_delta(
+            &old_dir,
+            &new_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Save delta
+        save_delta_package(&delta, &delta_path).unwrap();
+
+        // Verify file exists
+        assert!(delta_path.exists());
+
+        // Load delta
+        let loaded = load_delta_package(&delta_path).unwrap();
+
+        // Verify loaded delta matches original
+        assert_eq!(loaded.from_version, "1.0.0");
+        assert_eq!(loaded.to_version, "1.0.1");
+        assert_eq!(loaded.patches.len(), delta.patches.len());
     }
 }
