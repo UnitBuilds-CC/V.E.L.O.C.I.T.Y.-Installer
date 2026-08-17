@@ -386,3 +386,42 @@ pub fn show_finish_dialog(app_name: &str, install_dir: &Path, run_after: Option<
         }
     }
 }
+
+/// Show a password input dialog for encrypted installers.
+///
+/// Uses a simple input box approach — since Win32 doesn't have a built-in
+/// password input box, we use a message box with an input prompt.
+/// The user enters the password via stdin as fallback.
+pub fn show_password_prompt() -> String {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::core::PCWSTR;
+
+    info!("Prompting user for installer password");
+
+    // Try to read from stdin if available (for scripted usage)
+    // Otherwise, show a message box explaining the situation
+    let prompt = "This installer is password-protected.\n\n\
+                  Please enter the password using the command line:\n\
+                  installer.exe /P=yourpassword\n\n\
+                  Or enter the password below (press Enter when done):";
+
+    let title = "Password Required";
+    let prompt_w: Vec<u16> = prompt.encode_utf16().chain(std::iter::once(0)).collect();
+    let title_w: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // Show the prompt message
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(prompt_w.as_ptr()),
+            PCWSTR(title_w.as_ptr()),
+            MB_OK | MB_ICONQUESTION,
+        );
+    }
+
+    // Read password from stdin
+    let mut password = String::new();
+    eprint!("Password: ");
+    let _ = std::io::stdin().read_line(&mut password);
+    password.trim().to_string()
+}

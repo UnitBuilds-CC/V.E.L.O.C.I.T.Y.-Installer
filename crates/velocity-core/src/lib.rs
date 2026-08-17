@@ -28,6 +28,8 @@ pub mod arch_detect;
 pub mod condition;
 pub mod reboot;
 pub mod installer_mutex;
+pub mod checksum;
+pub mod encryption;
 pub mod error;
 
 pub use error::*;

@@ -87,6 +87,14 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
     )?;
     info!("Compressed payload: {} bytes ({:?} format)", compressed_data.len(), format);
 
+    // Step 3.5: Encrypt payload if password is set
+    let final_payload_data = if !manifest.install.password.is_empty() {
+        info!("Encrypting payload with password");
+        velocity_core::encryption::encrypt(&compressed_data, &manifest.install.password)
+    } else {
+        compressed_data
+    };
+
     // Step 4: Serialize manifest to JSON
     let manifest_json = serde_json::to_vec(&manifest)
         .map_err(|e| CompilerError::Other(format!("Failed to serialize manifest: {}", e)))?;
@@ -103,7 +111,7 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
     velocity_core::payload::create_payload(
         &runtime_exe,
         &manifest_json,
-        &compressed_data,
+        &final_payload_data,
         &options.output_path,
     )?;
 
@@ -142,14 +150,14 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         options.output_path.display(),
         installer_size,
         files.len(),
-        (1.0 - compressed_data.len() as f64 / original_size as f64) * 100.0
+        (1.0 - final_payload_data.len() as f64 / original_size as f64) * 100.0
     );
 
     Ok(BuildResult {
         installer_path: options.output_path.clone(),
         installer_size,
         file_count: files.len(),
-        payload_size: compressed_data.len() as u64,
+        payload_size: final_payload_data.len() as u64,
         original_size,
     })
 }

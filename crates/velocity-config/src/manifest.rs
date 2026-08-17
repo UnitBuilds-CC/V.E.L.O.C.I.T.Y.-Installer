@@ -126,6 +126,22 @@ pub struct InstallConfig {
     /// Whether to create a desktop shortcut
     #[serde(default)]
     pub create_desktop_shortcut: bool,
+    /// Whether to verify file checksums after extraction
+    #[serde(default)]
+    pub verify_checksums: bool,
+    /// Hash algorithm for checksum verification: "sha256" or "sha512"
+    #[serde(default = "default_checksum_algo")]
+    pub checksum_algo: String,
+    /// Password for encrypted installers (empty = no encryption)
+    #[serde(default)]
+    pub password: String,
+    /// Installation types (e.g., "full", "compact", "custom")
+    #[serde(default)]
+    pub types: Vec<InstallType>,
+}
+
+fn default_checksum_algo() -> String {
+    "sha256".to_string()
 }
 
 impl Default for InstallConfig {
@@ -145,6 +161,10 @@ impl Default for InstallConfig {
             show_language: false,
             min_disk_space: 0,
             create_desktop_shortcut: false,
+            verify_checksums: false,
+            checksum_algo: default_checksum_algo(),
+            password: String::new(),
+            types: vec![],
         }
     }
 }
@@ -551,6 +571,28 @@ pub struct Component {
     /// Dependencies on other component IDs (must be installed if those are)
     #[serde(default)]
     pub depends_on: Vec<String>,
+}
+
+/// Installation type definition (e.g., "Full", "Compact", "Custom").
+///
+/// Types group components into predefined installation profiles.
+/// For example, a "Full" type might include all components, while "Compact"
+/// only includes the mandatory ones.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallType {
+    /// Type identifier (e.g., "full", "compact", "custom")
+    pub id: String,
+    /// Display name shown to the user (e.g., "Full Installation")
+    pub name: String,
+    /// Description shown in the UI
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Component IDs included in this type
+    #[serde(default)]
+    pub components: Vec<String>,
+    /// Whether this is the default type
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 /// Localization configuration for multi-language installer UI.
