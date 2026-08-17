@@ -92,6 +92,8 @@ struct WizardData {
     sidebar_image_path: Option<String>,
     // Sidebar bitmap
     h_sidebar_bmp: HBITMAP,
+    // Localized UI strings
+    strings: WizardStrings,
     h_page_title: HWND,
     h_page_desc: HWND,
     h_sidebar_title: HWND,
@@ -106,6 +108,82 @@ struct WizardData {
     h_back: HWND,
     h_next: HWND,
     h_cancel: HWND,
+}
+
+/// Pre-resolved localized strings for the wizard UI.
+struct WizardStrings {
+    btn_next: String,
+    btn_back: String,
+    btn_install: String,
+    btn_finish: String,
+    btn_cancel: String,
+    btn_browse: String,
+    welcome_title: String,
+    welcome_desc: String,
+    license_title: String,
+    license_desc: String,
+    dir_title: String,
+    dir_desc: String,
+    components_title: String,
+    components_desc: String,
+    install_title: String,
+    install_desc: String,
+    finish_title: String,
+    finish_desc: String,
+    finish_launch: String,
+    msg_confirm_cancel: String,
+}
+
+impl WizardStrings {
+    fn from_localizer(loc: &velocity_core::localization::Localizer, app_name: &str, version: &str) -> Self {
+        WizardStrings {
+            btn_next: loc.get_simple("btn_next"),
+            btn_back: loc.get_simple("btn_back"),
+            btn_install: loc.get_simple("btn_install"),
+            btn_finish: loc.get_simple("btn_finish"),
+            btn_cancel: loc.get_simple("btn_cancel"),
+            btn_browse: loc.get_simple("btn_browse"),
+            welcome_title: loc.get("wizard_welcome_title", &[("app_name", app_name)]),
+            welcome_desc: loc.get("wizard_welcome_body", &[("app_name", app_name), ("version", version)]),
+            license_title: loc.get_simple("wizard_license_title"),
+            license_desc: loc.get_simple("wizard_license_subtitle"),
+            dir_title: loc.get_simple("wizard_select_dir_title"),
+            dir_desc: loc.get("wizard_select_dir_subtitle", &[("app_name", app_name)]),
+            components_title: loc.get_simple("wizard_components_title"),
+            components_desc: loc.get_simple("wizard_components_subtitle"),
+            install_title: loc.get_simple("wizard_install_title"),
+            install_desc: loc.get("wizard_install_subtitle", &[("app_name", app_name)]),
+            finish_title: loc.get_simple("wizard_finish_title"),
+            finish_desc: loc.get("wizard_finish_subtitle", &[("app_name", app_name)]),
+            finish_launch: loc.get("wizard_finish_launch", &[("app_name", app_name)]),
+            msg_confirm_cancel: loc.get_simple("msg_confirm_cancel"),
+        }
+    }
+
+    fn english_defaults(app_name: &str, version: &str) -> Self {
+        WizardStrings {
+            btn_next: "&Next >".into(),
+            btn_back: "< &Back".into(),
+            btn_install: "&Install".into(),
+            btn_finish: "&Finish".into(),
+            btn_cancel: "Cancel".into(),
+            btn_browse: "&Browse...".into(),
+            welcome_title: "Welcome".into(),
+            welcome_desc: format!("This will install {} {} on your computer.\n\nClick Next to continue, or Cancel to exit.", app_name, version),
+            license_title: "License Agreement".into(),
+            license_desc: "Please read the license agreement carefully".into(),
+            dir_title: "Select Installation Folder".into(),
+            dir_desc: format!("Choose where to install {}", app_name),
+            components_title: "Select Components".into(),
+            components_desc: "Choose which features to install".into(),
+            install_title: "Installing".into(),
+            install_desc: format!("Please wait while {} is installed.", app_name),
+            finish_title: "Installation Complete".into(),
+            finish_desc: format!("{} has been successfully installed.", app_name),
+            finish_launch: format!("Launch {}", app_name),
+            msg_confirm_cancel: "Are you sure you want to cancel?".into(),
+        }
+    }
 }
 
 /// Run the native Win32 wizard.
@@ -134,10 +212,14 @@ pub fn run_native_wizard(
     let sidebar_image_path = manifest.ui.sidebar.as_ref()
         .map(|p| p.to_string_lossy().to_string());
 
+    // Build localized strings
+    let localizer = velocity_core::localization::Localizer::new(&manifest.localization);
+    let strings = WizardStrings::from_localizer(&localizer, &manifest.app.name, &manifest.app.version);
+
     run_wizard_window(
         &manifest.app.name, &manifest.app.version, &default_dir,
         has_license, has_components, &license_text, accent, &components,
-        payload_data, sidebar_image_path,
+        payload_data, sidebar_image_path, strings,
     )
 }
 
@@ -162,6 +244,7 @@ fn run_wizard_window(
     accent_rgb: [u8; 3], components: &[String],
     payload_data: Option<Vec<u8>>,
     sidebar_image_path: Option<String>,
+    strings: WizardStrings,
 ) -> Result<NativeWizardResult> {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
@@ -194,6 +277,7 @@ fn run_wizard_window(
             payload_data, wizard_state: None,
             sidebar_image_path,
             h_sidebar_bmp: HBITMAP::default(),
+            strings,
             h_page_title: HWND::default(), h_page_desc: HWND::default(),
             h_sidebar_title: HWND::default(), h_sidebar_ver: HWND::default(),
             h_license: HWND::default(), h_dir_edit: HWND::default(),
@@ -318,8 +402,8 @@ unsafe extern "system" fn wizard_wnd_proc(
                 }
                 BTN_NEXT => handle_next(hwnd, d),
                 BTN_CANCEL => {
-                    let mw = wn("Are you sure you want to cancel?");
-                    let tw = wn("Confirm Exit");
+                    let mw = wn(&d.strings.msg_confirm_cancel);
+                    let tw = wn(&d.app_name);
                     let r = MessageBoxW(hwnd, PCWSTR(mw.as_ptr()), PCWSTR(tw.as_ptr()), MB_YESNO | MB_ICONQUESTION);
                     if r == IDYES { let _ = DestroyWindow(hwnd); }
                 }
@@ -478,21 +562,25 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         162, 80, 250, 20, parent, HMENU(CHK_LAUNCH_ID as *mut _), hi, None,
     ).unwrap_or_default();
 
-    // Navigation buttons
+    // Navigation buttons — use localized strings
+    let back_w = wn(&d.strings.btn_back);
+    let next_w = wn(&d.strings.btn_next);
+    let cancel_w = wn(&d.strings.btn_cancel);
+
     d.h_back = CreateWindowExW(
-        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("< &Back"),
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), PCWSTR(back_w.as_ptr()),
         WS_CHILD | WS_TABSTOP,
         240, 320, 80, 28, parent, HMENU(BTN_BACK as *mut _), hi, None,
     ).unwrap_or_default();
 
     d.h_next = CreateWindowExW(
-        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("&Next >"),
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), PCWSTR(next_w.as_ptr()),
         ws(WS_CHILD.0 | WS_TABSTOP.0 | 0x00000001), // BS_DEFPUSHBUTTON
         326, 320, 80, 28, parent, HMENU(BTN_NEXT as *mut _), hi, None,
     ).unwrap_or_default();
 
     d.h_cancel = CreateWindowExW(
-        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("Cancel"),
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), PCWSTR(cancel_w.as_ptr()),
         WS_CHILD | WS_TABSTOP,
         412, 320, 80, 28, parent, HMENU(BTN_CANCEL as *mut _), hi, None,
     ).unwrap_or_default();
@@ -516,10 +604,10 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
         let _ = ShowWindow(d.h_cancel, SW_SHOW);
     }
 
-    let next_text = if is_last { "&Finish" }
-        else if is_install { "&Cancel" }
-        else if d.page_idx == d.pages.len() - 2 { "&Install" }
-        else { "&Next >" };
+    let next_text = if is_last { &d.strings.btn_finish }
+        else if is_install { &d.strings.btn_cancel }
+        else if d.page_idx == d.pages.len() - 2 { &d.strings.btn_install }
+        else { &d.strings.btn_next };
     let nw = wn(next_text);
     let _ = SetWindowTextW(d.h_next, PCWSTR(nw.as_ptr()));
 
@@ -530,41 +618,43 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
 
     match page {
         WizardPage::Welcome => {
-            set_txt(d.h_page_title, "Welcome");
-            set_txt(d.h_page_desc, &format!("Welcome to {} {} Setup.\r\nClick Next to continue.", d.app_name, d.version));
+            set_txt(d.h_page_title, &d.strings.welcome_title);
+            set_txt(d.h_page_desc, &d.strings.welcome_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
         }
         WizardPage::License => {
-            set_txt(d.h_page_title, "License Agreement");
-            set_txt(d.h_page_desc, "Please review the license terms.");
+            set_txt(d.h_page_title, &d.strings.license_title);
+            set_txt(d.h_page_desc, &d.strings.license_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
             set_txt(d.h_license, &d.license_text);
             show_c(d.h_license);
         }
         WizardPage::Directory => {
-            set_txt(d.h_page_title, "Select Destination");
-            set_txt(d.h_page_desc, "Where should the application be installed?");
+            set_txt(d.h_page_title, &d.strings.dir_title);
+            set_txt(d.h_page_desc, &d.strings.dir_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
             set_txt(d.h_dir_edit, &d.install_dir);
             show_c(d.h_dir_edit); show_c(d.h_browse);
         }
         WizardPage::Components => {
-            set_txt(d.h_page_title, "Select Components");
-            set_txt(d.h_page_desc, "Select the components to install:");
+            set_txt(d.h_page_title, &d.strings.components_title);
+            set_txt(d.h_page_desc, &d.strings.components_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
             show_c(d.h_components);
         }
         WizardPage::Installing => {
-            set_txt(d.h_page_title, "Installing");
-            set_txt(d.h_page_desc, "Please wait while the application is installed.");
+            set_txt(d.h_page_title, &d.strings.install_title);
+            set_txt(d.h_page_desc, &d.strings.install_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
             show_c(d.h_progress); show_c(d.h_file_label);
         }
         WizardPage::Finished => {
-            set_txt(d.h_page_title, "Installation Complete");
-            set_txt(d.h_page_desc, &format!("{} {} has been successfully installed.", d.app_name, d.version));
+            set_txt(d.h_page_title, &d.strings.finish_title);
+            set_txt(d.h_page_desc, &d.strings.finish_desc);
             show_c(d.h_page_title); show_c(d.h_page_desc);
             show_c(d.h_launch_chk);
+            // Update launch checkbox text
+            set_txt(d.h_launch_chk, &d.strings.finish_launch);
         }
     }
     let _ = InvalidateRect(hwnd, None, true);
