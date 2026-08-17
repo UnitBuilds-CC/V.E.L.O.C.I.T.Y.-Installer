@@ -139,9 +139,16 @@ fn main() -> Result<()> {
                         info.release_notes.as_deref(),
                     );
                     if open_url && !info.download_url.is_empty() {
-                        let _ = std::process::Command::new("cmd")
-                            .args(["/C", "start", "", &info.download_url])
-                            .spawn();
+                        if is_safe_url_for_shell(&info.download_url) {
+                            let _ = std::process::Command::new("cmd")
+                                .args(["/C", "start", "", &info.download_url])
+                                .spawn();
+                        } else {
+                            warn!(
+                                "Download URL rejected by safety check: {}",
+                                info.download_url
+                            );
+                        }
                     }
                 }
                 Ok(_) => {
@@ -164,7 +171,8 @@ fn main() -> Result<()> {
             // Prompt user for password
             velocity_ui::classic::show_password_prompt()
         };
-        match velocity_core::encryption::decrypt(&payload_data, &password) {
+        let password = sanitize_password(&password);
+        match velocity_core::encryption::decrypt(&payload_data, password) {
             Some(decrypted) => {
                 info!("Payload decrypted successfully");
                 payload_data = decrypted;
@@ -266,6 +274,16 @@ fn main() -> Result<()> {
 
     let install_dir = &wizard_result.install_dir;
     info!("Installing to: {}", install_dir.display());
+
+    // Validate install directory is not a dangerous system path
+    if let Err(e) = validate_install_dir(install_dir) {
+        error!("Invalid install directory: {}", e);
+        if !args.silent {
+            velocity_ui::classic::show_error("Invalid Install Directory", &e);
+        }
+        return Err(anyhow::anyhow!("{}", e));
+    }
+
     logging::log_op("INSTALL", &format!("Target: {}", install_dir.display()));
 
     // Step 3: Check if elevation is needed
@@ -943,4 +961,188 @@ fn install_crash_handler() {
         eprintln!("FATAL: Installer crashed at {}\n{}", location, payload);
         eprintln!("Crash report written to: {}", crash_file.display());
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Runtime input validation
+// ---------------------------------------------------------------------------
+
+/// Maximum allowed password length (prevents PBKDF2 DoS with extremely long passwords).
+const MAX_PASSWORD_LENGTH: usize = 1024;
+
+/// Validate the install directory to prevent installation to dangerous system paths.
+///
+/// Rejects:
+/// - Null bytes (path traversal via embedded null)
+/// - Windows system directories (C:\Windows, C:\Windows\System32, etc.)
+/// - Root of a drive (C:\, D:\) — user should pick a specific directory
+/// - Paths longer than 240 characters (MAX_PATH safety margin)
+fn validate_install_dir(path: &std::path::Path) -> std::result::Result<(), String> {
+    let path_str = path.to_string_lossy();
+
+    // Reject null bytes
+    if path_str.contains('\0') {
+        return Err("Install path contains invalid null byte".to_string());
+    }
+
+    // Reject empty paths
+    if path_str.is_empty() {
+        return Err("Install path is empty".to_string());
+    }
+
+    // Reject paths longer than MAX_PATH safety margin
+    if path_str.len() > 240 {
+        return Err(format!(
+            "Install path is too long ({} chars, max 240)",
+            path_str.len()
+        ));
+    }
+
+    // Normalize to lowercase for comparison
+    let normalized = path_str.to_lowercase();
+    let normalized_trimmed = normalized.trim_end_matches('\\').trim_end_matches('/');
+
+    // Reject drive roots (e.g., "C:\", "D:\")
+    if normalized_trimmed.len() <= 3 && normalized_trimmed.ends_with(':') {
+        return Err(
+            "Cannot install to the root of a drive. Please choose a specific directory."
+                .to_string(),
+        );
+    }
+
+    // Reject dangerous Windows system directories.
+    // Note: We reject the roots of these directories but allow subdirectories
+    // (e.g., C:\Users\user\Desktop\app is fine, but C:\Users itself is not).
+    let dangerous_exact = [
+        "c:\\windows",
+        "c:\\windows\\system32",
+        "c:\\windows\\syswow64",
+        "c:\\program files",
+        "c:\\program files (x86)",
+        "c:\\programdata",
+        "c:\\users",
+    ];
+
+    // These are dangerous even as subdirectories (core OS files)
+    let dangerous_prefix = ["c:\\windows\\system32", "c:\\windows\\syswow64"];
+
+    for dangerous in &dangerous_exact {
+        if normalized_trimmed == *dangerous {
+            return Err(format!(
+                "Cannot install to system directory '{}'. Please choose a different location.",
+                dangerous
+            ));
+        }
+    }
+
+    for dangerous in &dangerous_prefix {
+        if normalized_trimmed.starts_with(&format!("{}\\", dangerous)) {
+            return Err(format!(
+                "Cannot install to system directory '{}'. Please choose a different location.",
+                dangerous
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Truncate a password to the maximum allowed length to prevent PBKDF2 DoS.
+fn sanitize_password(password: &str) -> &str {
+    if password.len() > MAX_PASSWORD_LENGTH {
+        warn!(
+            "Password truncated from {} to {} characters",
+            password.len(),
+            MAX_PASSWORD_LENGTH
+        );
+        &password[..MAX_PASSWORD_LENGTH]
+    } else {
+        password
+    }
+}
+
+/// Validate a URL is safe to pass to `cmd /C start` (no shell metacharacters).
+///
+/// Only allows URLs that start with http:// or https:// and contain no
+/// characters that could be used for command injection.
+fn is_safe_url_for_shell(url: &str) -> bool {
+    // Must start with http:// or https://
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return false;
+    }
+
+    // Reject shell metacharacters that could enable command injection
+    let dangerous_chars = [
+        '&', '|', ';', '`', '$', '(', ')', '{', '}', '<', '>', '"', '\'', '\\', '\n', '\r', '\0',
+    ];
+    !url.chars().any(|c| dangerous_chars.contains(&c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_install_dir_valid() {
+        assert!(validate_install_dir(std::path::Path::new("C:\\Program Files\\MyApp")).is_ok());
+        assert!(validate_install_dir(std::path::Path::new("D:\\Games\\MyGame")).is_ok());
+        assert!(
+            validate_install_dir(std::path::Path::new("C:\\Users\\user\\Desktop\\app")).is_ok()
+        );
+    }
+
+    #[test]
+    fn test_validate_install_dir_rejects_system_dirs() {
+        assert!(validate_install_dir(std::path::Path::new("C:\\Windows")).is_err());
+        assert!(validate_install_dir(std::path::Path::new("C:\\Windows\\System32")).is_err());
+        assert!(validate_install_dir(std::path::Path::new("C:\\Windows\\SysWOW64")).is_err());
+        assert!(validate_install_dir(std::path::Path::new("C:\\ProgramData")).is_err());
+    }
+
+    #[test]
+    fn test_validate_install_dir_rejects_drive_root() {
+        assert!(validate_install_dir(std::path::Path::new("C:\\")).is_err());
+        assert!(validate_install_dir(std::path::Path::new("D:\\")).is_err());
+    }
+
+    #[test]
+    fn test_validate_install_dir_rejects_null_byte() {
+        assert!(validate_install_dir(std::path::Path::new("C:\\My\0App")).is_err());
+    }
+
+    #[test]
+    fn test_validate_install_dir_rejects_too_long() {
+        let long_path = format!("C:\\{}", "A".repeat(250));
+        assert!(validate_install_dir(std::path::Path::new(&long_path)).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_password_short() {
+        let pw = "short_password";
+        assert_eq!(sanitize_password(pw), pw);
+    }
+
+    #[test]
+    fn test_sanitize_password_too_long() {
+        let pw = "A".repeat(2000);
+        let sanitized = sanitize_password(&pw);
+        assert_eq!(sanitized.len(), MAX_PASSWORD_LENGTH);
+    }
+
+    #[test]
+    fn test_is_safe_url_for_shell_valid() {
+        assert!(is_safe_url_for_shell("https://example.com/download"));
+        assert!(is_safe_url_for_shell(
+            "http://releases.example.com/v1.0/installer.exe"
+        ));
+    }
+
+    #[test]
+    fn test_is_safe_url_for_shell_rejects_injection() {
+        assert!(!is_safe_url_for_shell("https://example.com/path&calc.exe"));
+        assert!(!is_safe_url_for_shell("https://example.com/path|del"));
+        assert!(!is_safe_url_for_shell("https://example.com/path;rm"));
+        assert!(!is_safe_url_for_shell("ftp://example.com/file")); // not http(s)
+        assert!(!is_safe_url_for_shell("javascript:alert(1)"));
+    }
 }

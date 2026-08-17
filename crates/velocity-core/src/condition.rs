@@ -387,30 +387,20 @@ mod tests {
     #[test]
     fn test_file_exists() {
         // This file should exist on Windows
-        assert!(
-            evaluate_condition("file_exists:C:\\Windows\\System32\\kernel32.dll").unwrap()
-        );
-        assert!(
-            !evaluate_condition("file_exists:C:\\nonexistent_file_xyz_123.dll").unwrap()
-        );
+        assert!(evaluate_condition("file_exists:C:\\Windows\\System32\\kernel32.dll").unwrap());
+        assert!(!evaluate_condition("file_exists:C:\\nonexistent_file_xyz_123.dll").unwrap());
     }
 
     #[test]
     fn test_file_missing() {
-        assert!(
-            evaluate_condition("file_missing:C:\\nonexistent_file_xyz_123.dll").unwrap()
-        );
-        assert!(
-            !evaluate_condition("file_missing:C:\\Windows\\System32\\kernel32.dll").unwrap()
-        );
+        assert!(evaluate_condition("file_missing:C:\\nonexistent_file_xyz_123.dll").unwrap());
+        assert!(!evaluate_condition("file_missing:C:\\Windows\\System32\\kernel32.dll").unwrap());
     }
 
     #[test]
     fn test_dir_exists() {
         assert!(evaluate_condition("dir_exists:C:\\Windows").unwrap());
-        assert!(
-            !evaluate_condition("dir_exists:C:\\nonexistent_dir_xyz").unwrap()
-        );
+        assert!(!evaluate_condition("dir_exists:C:\\nonexistent_dir_xyz").unwrap());
     }
 
     #[test]
@@ -427,9 +417,7 @@ mod tests {
     fn test_env_condition() {
         // PATH should be set on any system
         assert!(evaluate_condition("env:PATH").unwrap());
-        assert!(
-            !evaluate_condition("env:VELOCITY_NONEXISTENT_VAR_XYZ").unwrap()
-        );
+        assert!(!evaluate_condition("env:VELOCITY_NONEXISTENT_VAR_XYZ").unwrap());
     }
 
     #[test]
@@ -455,9 +443,7 @@ mod tests {
         assert!(evaluate_all_conditions(&conditions).unwrap());
 
         let conditions_with_false = vec!["always".to_string(), "never".to_string()];
-        assert!(
-            !evaluate_all_conditions(&conditions_with_false).unwrap()
-        );
+        assert!(!evaluate_all_conditions(&conditions_with_false).unwrap());
     }
 
     #[test]

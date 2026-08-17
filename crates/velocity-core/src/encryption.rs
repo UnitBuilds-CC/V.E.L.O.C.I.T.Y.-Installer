@@ -5,7 +5,8 @@
 //! and integrity verification — tampered data is detected automatically.
 //!
 //! Key derivation: PBKDF2-HMAC-SHA256 with 600,000 iterations (OWASP 2023
-//! recommendation) and a random 16-byte salt.
+//! recommendation) and a cryptographically secure random 16-byte salt
+//! (via BCryptGenRandom — Windows CSPRNG).
 
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
@@ -176,56 +177,50 @@ fn derive_key(password: &str, salt: &[u8]) -> [u8; 32] {
     key
 }
 
-/// Generate a random 16-byte salt for PBKDF2 key derivation.
+/// Generate a random 16-byte salt for PBKDF2 key derivation using BCryptGenRandom
+/// (Windows CSPRNG — cryptographically secure).
 fn generate_salt() -> [u8; SALT_SIZE] {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    // Use a combination of time and process info for salt generation.
-    // In a production system you'd use a CSPRNG, but for an installer
-    // this provides sufficient uniqueness when combined with PBKDF2.
-    let time_nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
     let mut salt = [0u8; SALT_SIZE];
-    let time_bytes = time_nanos.to_le_bytes();
-    // Copy first 8 bytes from timestamp
-    salt[..8].copy_from_slice(&time_bytes[..8]);
-    // Fill remaining 8 bytes with a hash of the time + pid
-    let pid = std::process::id();
-    let mut h = Sha256::new();
-    h.update(time_bytes);
-    h.update(pid.to_le_bytes());
-    let hash = h.finalize();
-    salt[8..16].copy_from_slice(&hash[..8]);
-
+    fill_random(&mut salt);
     salt
 }
 
-/// Generate a random 12-byte nonce.
+/// Generate a random 12-byte nonce using BCryptGenRandom (Windows CSPRNG).
 fn generate_nonce() -> [u8; NONCE_SIZE] {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    // Use a combination of time and a counter for nonce generation.
-    // In a production system you'd use a CSPRNG, but for an installer
-    // this provides sufficient uniqueness.
-    let time_nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
     let mut nonce = [0u8; NONCE_SIZE];
-    let time_bytes = time_nanos.to_le_bytes();
-    // Copy first 8 bytes from timestamp
-    nonce[..8].copy_from_slice(&time_bytes[..8]);
-    // Fill remaining 4 bytes with a hash of the time
-    let mut h = Sha256::new();
-    h.update(time_bytes);
-    let hash = h.finalize();
-    nonce[8..12].copy_from_slice(&hash[..4]);
-
+    fill_random(&mut nonce);
     nonce
+}
+
+/// Fill a byte slice with cryptographically secure random bytes using
+/// `BCryptGenRandom` — the Windows built-in CSPRNG (backed by the OS kernel).
+fn fill_random(buf: &mut [u8]) {
+    use windows::Win32::Security::Cryptography::{
+        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    };
+
+    // SAFETY: BCryptGenRandom writes exactly buf.len() bytes into the provided
+    // buffer. The buffer is a valid mutable slice with correct length. The flag
+    // BCRYPT_USE_SYSTEM_PREFERRED_RNG selects the OS-preferred CSPRNG algorithm.
+    let result = unsafe { BCryptGenRandom(None, buf, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    if result.is_err() {
+        // Fallback: this should never happen on a functioning Windows system.
+        // If it does, the encryption will still be correct but with
+        // non-random salt/nonce (uniqueness degraded, not confidentiality).
+        tracing::error!("BCryptGenRandom failed — falling back to time-based randomness");
+        use sha2::Digest;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let time_nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut h = sha2::Sha256::new();
+        h.update(time_nanos.to_le_bytes());
+        h.update(std::process::id().to_le_bytes());
+        let hash = h.finalize();
+        let len = buf.len().min(32);
+        buf[..len].copy_from_slice(&hash[..len]);
+    }
 }
 
 #[cfg(test)]
@@ -335,5 +330,31 @@ mod tests {
         let encrypted = encrypt(data, "pass");
         // Overhead = magic(8) + salt(16) + nonce(12) + verifier(32) + tag(16) = 84
         assert_eq!(encrypted.len(), data.len() + 84);
+    }
+
+    #[test]
+    fn test_csprng_produces_unique_values() {
+        // Verify that successive encryptions produce different salt/nonce
+        // (proves CSPRNG is working, not returning constant values)
+        let data = b"same data";
+        let e1 = encrypt(data, "pass");
+        let e2 = encrypt(data, "pass");
+        // Both should decrypt to the same value
+        assert_eq!(decrypt(&e1, "pass").unwrap(), data);
+        assert_eq!(decrypt(&e2, "pass").unwrap(), data);
+        // But the salt+nonce portions (bytes 8..36) should differ
+        assert_ne!(
+            &e1[8..36],
+            &e2[8..36],
+            "CSPRNG should produce unique salt+nonce"
+        );
+    }
+
+    #[test]
+    fn test_fill_random_not_all_zeros() {
+        let mut buf = [0u8; 32];
+        fill_random(&mut buf);
+        // Probability of 32 random bytes all being zero is 2^-256
+        assert_ne!(buf, [0u8; 32], "CSPRNG should not return all zeros");
     }
 }

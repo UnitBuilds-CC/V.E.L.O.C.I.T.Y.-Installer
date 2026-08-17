@@ -43,12 +43,18 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 
 ### Security Hardening
 - **AES-256-GCM encryption** — Authenticated encryption for installer payloads with password protection
+- **PBKDF2-HMAC-SHA256 key derivation** — 600,000 iterations (OWASP 2023 recommendation) with cryptographically secure random salt (BCryptGenRandom)
+- **CSPRNG salt and nonce** — All cryptographic randomness uses Windows BCryptGenRandom (kernel-level CSPRNG)
 - **Secure temp directories** — Unique per-session directories with restricted access
 - **Path traversal protection** — Prevents zip-slip attacks in archives
+- **Install directory validation** — Rejects system directories (Windows, System32, ProgramData), drive roots, and paths with null bytes
+- **Password length limit** — 1024-char max prevents PBKDF2 denial-of-service
+- **Shell injection protection** — URL validation before passing to `cmd /C start`
 - **Null byte rejection** — Blocks null byte injection in paths
 - **Absolute path rejection** — Archive entries must use relative paths only
 - **File backup before overwrite** — Automatic `.velocity_backup` files before replacing
 - **File integrity verification** — SHA256 hash checking for downloaded files
+- **Crash reporting** — Panic hook writes backtrace to `%TEMP%/velocity_crashes/` for diagnostics
 
 ### Windows Integration
 - **Registry** — Full support for HKLM, HKCU, HKCR, HKU with REG_SZ, REG_DWORD, REG_EXPAND_SZ, REG_MULTI_SZ
@@ -310,7 +316,8 @@ velocity/
 │   │                          #        rollback, logging, disk space, file associations,
 │   │                          #        process detection, PE icon, elevation, payload,
 │   │                          #        downloader, dep resolver, dep installer,
-│   │                          #        localization, security
+│   │                          #        localization, security, encryption (AES-256-GCM),
+│   │                          #        updater, component tree, scripting engine
 │   ├── velocity-config/       # Config parser, validator, auto-gen, path variables
 │   ├── velocity-ui/           # Wizard UI with progress tracking + ETA
 │   ├── velocity-compiler/     # Compiles config+payload into standalone .exe
@@ -337,7 +344,7 @@ cargo build --release
 cargo test
 ```
 
-162 tests across all crates covering:
+187 tests across all crates covering:
 - Config parsing and validation (14 tests)
 - Archive creation and extraction (3 tests)
 - Payload format (1 test)
@@ -354,11 +361,15 @@ cargo test
 - Process detection (2 tests)
 - Uninstaller generation (2 tests)
 - Compiler integration (3 tests)
-- AES-256-GCM encryption (7 tests)
+- AES-256-GCM encryption + CSPRNG (12 tests)
 - Self-update version parsing (5 tests)
 - Component tree view (7 tests)
 - Scripting engine (13 tests)
 - End-to-end integration (2 tests)
+- Stress testing: 1000 files, 50MB, Unicode (3 tests)
+- Rollback correctness including stress (8 tests)
+- Fuzz-like parser robustness (12 tests)
+- Runtime input validation (9 tests)
 
 ## Comparison
 
@@ -380,6 +391,9 @@ cargo test
 - [x] **Phase 1: Foundation** — Core engine, classic UI, TOML config, compiler, runtime
 - [x] **Phase 1.5: Robustness** — Dependency management, localization, security hardening, component selection, progress tracking
 - [x] **Phase 6: Hardening** — AES-256-GCM encryption, self-update mechanism, component tree view, structured scripting engine, end-to-end integration tests
+- [x] **Phase 7: Quality** — Clippy cleanup, E2E integration tests, structured scripting, README updates
+- [x] **Phase 8: Production Hardening** — Stress testing, rollback testing, PBKDF2 key derivation, unsafe safety audit, GitHub Actions CI/CD, crash reporting, code signing docs, fuzz-like parser robustness
+- [x] **Phase 9: Final Fixes** — CSPRNG for encryption (BCryptGenRandom), runtime input validation (install dir, password limits, shell injection protection)
 - [ ] **Phase 2: Modern UI** — WebView2-based wizard with dark/light themes, animations
 - [ ] **Phase 3: Advanced** — WASM plugins, delta compression, full auto-update with download-and-swap
 - [ ] **Phase 4: Ecosystem** — GUI config editor, template marketplace, CI/CD integration
