@@ -87,8 +87,21 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 
 ### Self-Update & Scripting
 - **HTTP self-update** — Checks a JSON endpoint for new versions at startup, notifies the user, and opens the download URL
+- **Delta updates (bsdiff)** — Binary delta patching transfers only changes between versions, reducing update sizes by 80-95%. Includes path traversal protection, file locking, atomic rollback, disk space verification, and multi-hop chain support (max 5 hops)
 - **Structured scripting engine** — Variable substitution (`{install_dir}`, `{app_name}`), condition evaluation (`file_exists`, `dir_exists`, `action_success`), 7 action types (shell, copy, delete, mkdir, registry, env var), and configurable error policies (Abort, Continue, Retry)
 - **Component tree view** — Flattened hierarchy with indented display, disk space calculation, and dependency resolution
+
+### MSI & Enterprise Deployment
+- **MSI package generation** — Build enterprise-ready `.msi` packages from `velocity.toml` with `--package-format msi`
+- **Group Policy / SCCM / Intune** — MSI packages compatible with all major Windows deployment tools
+- **16 MSI table types** — Property, Directory, Component, File, Media, Feature, Registry, Shortcut, Environment, ServiceInstall, ServiceControl, CustomAction, InstallExecuteSequence, Upgrade, LaunchCondition, and cabinet
+- **Major upgrade support** — UpgradeCode for clean version transitions
+- **MSI digital signatures** — Sign MSI packages with `sign_msi()` using signtool.exe
+
+### Cross-Platform
+- **Windows** — Full support: MSI, Win32 UI, registry, services, shortcuts, elevation
+- **Linux** — Core engine, file operations, rollback, compression
+- **macOS** — Core engine, file operations, rollback, compression
 
 ## Quick Start
 
@@ -289,6 +302,8 @@ installer.exe /quiet
 |---------|-------------|
 | `velocity init [name]` | Scaffold a new installer project |
 | `velocity build` | Build the installer .exe |
+| `velocity build --delta` | Build with delta update generation (bsdiff) |
+| `velocity build --package-format msi` | Build an MSI package for enterprise deployment |
 | `velocity detect` | Auto-detect project settings |
 | `velocity check` | Deep validation of velocity.toml |
 | `velocity info <path>` | Show installer package info |
@@ -325,12 +340,19 @@ velocity/
 │   │                          #        process detection, PE icon, elevation, payload,
 │   │                          #        downloader, dep resolver, dep installer,
 │   │                          #        localization, security, encryption (AES-256-GCM),
-│   │                          #        updater, component tree, scripting engine
+│   │                          #        updater, delta updates (bsdiff), component tree,
+│   │                          #        scripting engine
 │   ├── velocity-config/       # Config parser, validator, auto-gen, path variables
 │   ├── velocity-ui/           # Wizard UI with progress tracking + ETA
-│   ├── velocity-compiler/     # Compiles config+payload into standalone .exe
+│   ├── velocity-compiler/     # Compiles config+payload into standalone .exe + MSI builder
 │   ├── velocity-runtime/      # Lightweight runtime embedded in each installer
 │   └── velocity-plugin-api/   # Plugin trait + SDK for custom actions
+├── docs/
+│   ├── DELTA_UPDATES.md       # Delta update architecture and usage
+│   ├── MSI.md                 # MSI compliance and enterprise deployment
+│   ├── CODE_SIGNING.md        # Code signing guide
+│   ├── CRYPTO_AUDIT.md        # Cryptographic audit report
+│   └── SAFETY_AUDIT.md        # Safety audit report
 ├── themes/
 │   ├── modern/                # WebView2-based modern UI (Phase 2)
 │   └── classic/               # Native Win32 wizard UI
@@ -352,7 +374,7 @@ cargo build --release
 cargo test
 ```
 
-213 tests across all crates covering:
+270 tests across all crates covering:
 - Config parsing and validation (14 tests)
 - Archive creation and extraction (3 tests)
 - Payload format (1 test)
@@ -381,21 +403,27 @@ cargo test
 - Modern WebView2 wizard (7 tests)
 - WASM plugin API + loader (15 tests)
 - Plugin integration tests (4 tests)
+- Delta updates: bsdiff roundtrip, path traversal, locking, version check, size limit (14 tests)
+- MSI builder: table mapping, signing, validation, cabinet (6 tests)
 
 ## Comparison
 
-| Feature | Velocity | Inno Setup | NSIS | WiX |
-|---------|----------|------------|------|-----|
-| Open Source | MIT/Apache | Inno Setup License | zlib | MS-RL |
-| Config Format | TOML | Pascal Script | NSIS Script | XML |
-| Compression | zstd | LZMA | LZMA | MSI/CAB |
-| Dependency Management | Built-in | Manual | Manual | Manual |
-| Localization | Built-in i18n | Language files | Language strings | Transform |
-| Silent Mode | Inno-compatible | Yes | Yes | Yes |
-| Rollback | Automatic | Yes | Yes | Yes (MSI) |
-| Component Selection | Yes | Yes | Yes | Yes |
-| Plugin System | WASM-ready | Pascal | NSIS Script | No |
-| Written In | Rust | Delphi | C++ | C# |
+| Feature | Velocity | Inno Setup | NSIS | WiX | Velopack |
+|---------|----------|------------|------|-----|----------|
+| Open Source | MIT/Apache | Inno Setup License | zlib | MS-RL | MIT |
+| Config Format | TOML | Pascal Script | NSIS Script | XML | C# Code |
+| Compression | zstd | LZMA | LZMA | MSI/CAB | LZMA |
+| Delta Updates (bsdiff) | Yes | No | No | No | Yes |
+| MSI Compliance | Yes | No | No | Yes | No |
+| Cross-Platform | Yes | No | No | No | Yes |
+| Dependency Management | Built-in | Manual | Manual | Manual | No |
+| Localization | Built-in i18n | Language files | Language strings | Transform | No |
+| Silent Mode | Inno-compatible | Yes | Yes | Yes | No |
+| Rollback | Automatic | Yes | Yes | Yes (MSI) | No |
+| Component Selection | Yes | Yes | Yes | Yes | No |
+| Plugin System | WASM-ready | Pascal | NSIS Script | No | No |
+| AES-256-GCM Encryption | Yes | No | No | No | No |
+| Written In | Rust | Delphi | C++ | C# | C# |
 
 ## Roadmap
 
@@ -408,7 +436,9 @@ cargo test
 - [x] **Phase 10: Beta Test + Ops** — Sample installer project, code signing automation, crypto audit, crash telemetry
 - [x] **Phase 2: Modern UI** — WebView2 wizard with dark/light themes, CSS animations, JS↔Rust RPC, `--modern` CLI flag
 - [x] **Phase 3: WASM Plugins** — Plugin trait with 9 lifecycle hooks, Host API, Wasmtime loader, sample plugin, integration tests
-- [ ] **Phase 4: Ecosystem** — GUI config editor, template marketplace, delta compression, full auto-update with download-and-swap
+- [x] **Phase 4: Delta Updates** — bsdiff binary patching, delta package format, multi-hop chain support, atomic rollback, file locking, disk space verification, path traversal protection
+- [x] **Phase 5: MSI Compliance** — MSI builder with 16 table types, cabinet files, digital signatures, enterprise deployment (GPO/SCCM/Intune), major upgrade support
+- [ ] **Phase 11: Ecosystem** — GUI config editor, template marketplace
 
 ## License
 

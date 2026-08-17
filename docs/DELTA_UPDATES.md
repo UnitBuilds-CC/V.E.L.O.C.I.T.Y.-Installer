@@ -4,7 +4,7 @@ Velocity Installer supports **binary delta updates** that transfer only the chan
 
 ## How It Works
 
-Delta updates use Zstd compression to generate binary patches between application versions:
+Delta updates use **bsdiff** for true binary diffing with **Zstd** compression on top, transferring only the changes between versions:
 
 ```
 Build-time: v1.0.0 + v1.0.1 → Delta Generator → v1.0.1-delta.zip
@@ -13,9 +13,15 @@ Runtime:    Current install + delta.zip → Delta Applier → Reconstructed v1.0
 
 ### Key Features
 
-- **Zstd binary patching** — Efficient compression of file differences
+- **bsdiff binary patching** — True binary diff algorithm producing patches 80-95% smaller than full files
+- **Zstd compression** — Additional compression layer on top of bsdiff patches
 - **SHA256 checksum verification** — Every patch verified before and after application
-- **Automatic rollback** — Failed updates restore the previous installation state
+- **Path traversal protection** — All delta paths validated against directory traversal attacks
+- **Atomic rollback** — Crash-safe rename-based rollback on any failure
+- **File locking** — Exclusive lock prevents concurrent update corruption
+- **Disk space verification** — Checks available space before applying (requires 2x install size)
+- **Version verification** — Fast-fails if delta's expected version doesn't match installed version
+- **Package size limit** — Rejects packages over 2 GB to prevent OOM
 - **Multi-hop updates** — Chain multiple deltas (v1.0.0 → v1.0.1 → v1.0.2)
 - **Smart heuristic** — Automatically chooses delta vs full download based on size
 
@@ -70,7 +76,7 @@ delta.zip/
 
 | Type | Description | Contents |
 |------|-------------|----------|
-| **Modified** | File changed between versions | Zstd binary patch (old → new) |
+| **Modified** | File changed between versions | bsdiff patch + Zstd (falls back to full Zstd if patch is larger) |
 | **Added** | New file in the update | Full file content (Zstd-compressed) |
 | **Deleted** | File removed in the update | Checksum only (for verification) |
 
@@ -176,13 +182,15 @@ apply_delta_chain(
 
 ## Rollback on Failure
 
-Every delta application creates a backup before modifying files:
+Every delta application uses **atomic rename-based** backup and rollback:
 
-1. **Backup** — Current installation state is copied to a `.backup` directory
-2. **Apply** — Patches are applied sequentially with checksum verification
-3. **Verify** — Each patched file is verified (SHA256 + size check)
-4. **Commit** — On success, backup is removed
-5. **Rollback** — On any failure, the backup is restored automatically
+1. **Lock** — Acquire exclusive file lock (prevents concurrent updates)
+2. **Verify space** — Check disk has 2x install size available
+3. **Backup** — Current installation atomically renamed to `.backup` (crash-safe)
+4. **Apply** — Patches applied with checksum verification (bsdiff or Zstd per file)
+5. **Verify** — Each patched file verified (SHA256 + size check)
+6. **Commit** — On success, backup is removed and lock released
+7. **Rollback** — On any failure, backup atomically restored (crash-safe)
 
 ## Benchmark
 
@@ -197,7 +205,7 @@ Typical results for a 50MB application:
 
 ### Factors Affecting Delta Size
 
-- **Binary files** — Higher compression ratio (Zstd dictionary training)
+- **Binary files** — Highest compression ratio (bsdiff finds byte-level similarities)
 - **Text/config files** — Moderate compression ratio
 - **Compressed assets** — Lower ratio (images, video already compressed)
 - **New files** — Included at full size (compressed)
@@ -257,9 +265,24 @@ level = 9  # Higher compression for smaller deltas
 | Chain broken | Missing intermediate delta version | Fall back to full update |
 | Delta too large | Delta exceeds 70% of full size | Automatically use full update instead |
 
+## Security
+
+Delta updates include multiple layers of protection:
+
+| Protection | Description |
+|------------|-------------|
+| **Path traversal** | All paths validated via `validate_relative_path()` — rejects `../`, absolute paths, null bytes |
+| **File locking** | Exclusive `fs2` lock prevents concurrent update corruption |
+| **Disk space** | Verified before apply (requires 2x install size + delta size) |
+| **Version check** | Fast-fails if delta's `from_version` doesn't match installed version |
+| **Package size limit** | `MAX_DELTA_PACKAGE_SIZE` (2 GB) prevents OOM from malicious packages |
+| **Download integrity** | Downloaded size verified against server-reported size |
+| **Per-file checksums** | SHA256 verified before AND after patching |
+| **Atomic rollback** | Rename-based crash recovery — install is never left in a half-applied state |
+
 ## Limitations
 
 - Delta generation requires both old and new version directories
-- Binary patching currently uses Zstd compression (not bsdiff); true binary diffing is planned for future releases
 - Multi-hop updates limited to 5 intermediate versions
 - Delta packages are platform-specific (Windows deltas won't apply to Linux)
+- Small files (< 1 KB) use full Zstd content instead of bsdiff patches (overhead not worth it)
