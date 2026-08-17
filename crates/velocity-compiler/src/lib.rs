@@ -4,6 +4,8 @@
 
 pub mod builder;
 pub mod error;
+pub mod msi_builder;
 
 pub use builder::*;
 pub use error::*;
+pub use msi_builder::*;
