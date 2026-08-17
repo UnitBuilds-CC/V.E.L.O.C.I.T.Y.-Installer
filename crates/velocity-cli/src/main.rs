@@ -43,6 +43,10 @@ enum Commands {
         #[arg(short, long, default_value = "3")]
         compression: i32,
 
+        /// Compression format: zstd (fast) or lzma2 (smaller)
+        #[arg(short = 'f', long, default_value = "zstd")]
+        format: Option<String>,
+
         /// Path to the runtime binary
         #[arg(long)]
         runtime: Option<String>,
@@ -141,10 +145,11 @@ fn main() -> Result<()> {
         Commands::Build {
             output,
             compression,
+            format,
             runtime,
             quiet,
         } => {
-            commands::build::run(output, compression, runtime, quiet)?;
+            commands::build::run(output, compression, format, runtime, quiet)?;
         }
         Commands::Detect { dir } => {
             commands::detect::run(&dir)?;

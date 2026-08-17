@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub fn run(
     output: Option<String>,
     compression: i32,
+    compression_format: Option<String>,
     runtime: Option<String>,
     quiet: bool,
 ) -> Result<()> {
@@ -17,9 +18,12 @@ pub fn run(
         .map(PathBuf::from)
         .unwrap_or_else(|| project_dir.join("output").join("installer.exe"));
 
+    let format = compression_format.unwrap_or_else(|| "zstd".to_string());
+
     if !quiet {
         println!();
         println!("  Building Velocity installer...");
+        println!("  Compression: {} (level {})", format, compression.clamp(0, 22));
         println!();
     }
 
@@ -27,6 +31,7 @@ pub fn run(
         project_dir,
         output_path: output_path.clone(),
         compression_level: compression.clamp(0, 22),
+        compression_format: format,
         runtime_path: runtime.map(PathBuf::from),
         quiet,
     };

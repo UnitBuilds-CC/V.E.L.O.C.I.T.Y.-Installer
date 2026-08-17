@@ -14,6 +14,8 @@ pub struct BuildOptions {
     pub output_path: PathBuf,
     /// Compression level (0-22, default 3)
     pub compression_level: i32,
+    /// Compression format: "zstd" (default, fast) or "lzma2" (smaller, slower)
+    pub compression_format: String,
     /// Path to the runtime binary (if not found automatically)
     pub runtime_path: Option<PathBuf>,
     /// Whether to build in quiet mode (no output)
@@ -26,6 +28,7 @@ impl Default for BuildOptions {
             project_dir: std::env::current_dir().unwrap_or_default(),
             output_path: PathBuf::from("output/installer.exe"),
             compression_level: 3,
+            compression_format: "zstd".to_string(),
             runtime_path: None,
             quiet: false,
         }
@@ -74,9 +77,15 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
 
     info!("Collected {} files ({} bytes uncompressed)", files.len(), original_size);
 
-    // Step 3: Create compressed archive
-    let compressed_data = velocity_core::extract::create_archive(&files, options.compression_level)?;
-    info!("Compressed payload: {} bytes", compressed_data.len());
+    // Step 3: Create compressed archive with selected format
+    let format = match options.compression_format.to_lowercase().as_str() {
+        "lzma2" | "lzma" | "xz" => velocity_core::extract::CompressionFormat::Lzma2,
+        _ => velocity_core::extract::CompressionFormat::Zstd,
+    };
+    let compressed_data = velocity_core::extract::create_archive_with_format(
+        &files, options.compression_level, format,
+    )?;
+    info!("Compressed payload: {} bytes ({:?} format)", compressed_data.len(), format);
 
     // Step 4: Serialize manifest to JSON
     let manifest_json = serde_json::to_vec(&manifest)
