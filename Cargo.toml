@@ -64,6 +64,8 @@ walkdir = "2"
 
 # Misc
 sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = "0.12"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 aes-gcm = "0.10"
