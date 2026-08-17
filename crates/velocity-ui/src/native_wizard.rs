@@ -1,0 +1,632 @@
+//! Native Win32 wizard window for the installer.
+//!
+//! Implements a proper multi-page wizard with:
+//! - Colored sidebar with branding
+//! - Page title and description
+//! - Content area that switches between pages
+//! - Navigation buttons (Back, Next/Install, Cancel)
+//! - Progress bar during installation
+//! - License agreement with scrollable text
+//! - Directory selection with browse button
+
+use crate::error::Result;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32};
+use tracing::info;
+use velocity_config::VelocityManifest;
+use windows::core::*;
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::Controls::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+// Control IDs
+const BTN_BACK: u16 = 1001;
+const BTN_NEXT: u16 = 1002;
+const BTN_CANCEL: u16 = 1003;
+const BTN_BROWSE: u16 = 1004;
+const PROGRESS_BAR_ID: u16 = 1006;
+const EDIT_LICENSE_ID: u16 = 1013;
+const EDIT_DIR_ID: u16 = 1014;
+const LIST_COMPONENTS_ID: u16 = 1015;
+const STATIC_FILE_ID: u16 = 1016;
+const CHK_LAUNCH_ID: u16 = 1017;
+const PAGE_TITLE_ID: u16 = 1020;
+const PAGE_DESC_ID: u16 = 1021;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WizardPage { Welcome, License, Directory, Components, Installing, Finished }
+
+/// Shared wizard state for install threads.
+pub struct WizardState {
+    pub progress_pct: AtomicU32,
+    pub current_file: std::sync::Mutex<String>,
+    pub cancelled: AtomicBool,
+    pub install_complete: AtomicBool,
+}
+
+impl WizardState {
+    pub fn new() -> Self {
+        WizardState {
+            progress_pct: AtomicU32::new(0),
+            current_file: std::sync::Mutex::new(String::new()),
+            cancelled: AtomicBool::new(false),
+            install_complete: AtomicBool::new(false),
+        }
+    }
+}
+
+/// Result from the wizard.
+#[derive(Debug, Clone)]
+pub struct NativeWizardResult {
+    pub install_dir: PathBuf,
+    pub cancelled: bool,
+    pub launch_after: bool,
+    pub selected_components: Vec<String>,
+}
+
+struct WizardData {
+    app_name: String,
+    version: String,
+    default_dir: String,
+    install_dir: String,
+    license_text: String,
+    accent_rgb: [u8; 3],
+    pages: Vec<WizardPage>,
+    page_idx: usize,
+    selected_components: Vec<String>,
+    all_components: Vec<String>,
+    launch_after: bool,
+    h_page_title: HWND,
+    h_page_desc: HWND,
+    h_sidebar_title: HWND,
+    h_sidebar_ver: HWND,
+    h_license: HWND,
+    h_dir_edit: HWND,
+    h_browse: HWND,
+    h_components: HWND,
+    h_progress: HWND,
+    h_file_label: HWND,
+    h_launch_chk: HWND,
+    h_back: HWND,
+    h_next: HWND,
+    h_cancel: HWND,
+}
+
+/// Run the native Win32 wizard.
+pub fn run_native_wizard(manifest: &VelocityManifest) -> Result<NativeWizardResult> {
+    info!("Starting native wizard for: {}", manifest.app.name);
+
+    let default_dir = velocity_config::VariableResolver::new(
+        &PathBuf::from(format!("C:\\Program Files\\{}", manifest.app.name)),
+    ).resolve(&manifest.install.default_dir);
+
+    let license_text = manifest.app.license.as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+
+    let has_license = manifest.app.license.is_some();
+    let has_components = !manifest.components.is_empty();
+    let components: Vec<String> = manifest.components.iter().map(|c| c.name.clone()).collect();
+    let accent = parse_accent_color(&manifest.ui.accent_color);
+
+    run_wizard_window(
+        &manifest.app.name, &manifest.app.version, &default_dir,
+        has_license, has_components, &license_text, accent, &components,
+    )
+}
+
+fn parse_accent_color(color: &str) -> [u8; 3] {
+    let hex = color.trim_start_matches('#');
+    if hex.len() >= 6 {
+        [
+            u8::from_str_radix(&hex[0..2], 16).unwrap_or(0x2D),
+            u8::from_str_radix(&hex[2..4], 16).unwrap_or(0x6D),
+            u8::from_str_radix(&hex[4..6], 16).unwrap_or(0xFF),
+        ]
+    } else { [0x2D, 0x6D, 0xFF] }
+}
+
+fn wn(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn run_wizard_window(
+    app_name: &str, version: &str, default_dir: &str,
+    has_license: bool, has_components: bool, license_text: &str,
+    accent_rgb: [u8; 3], components: &[String],
+) -> Result<NativeWizardResult> {
+    unsafe {
+        let icc = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_PROGRESS_CLASS | ICC_LISTVIEW_CLASSES,
+        };
+        let _ = InitCommonControlsEx(&icc);
+
+        let hinst = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
+            .unwrap_or_default();
+        let hi = HINSTANCE(hinst.0);
+
+        let title = format!("{} {} Setup", app_name, version);
+        let title_w = wn(&title);
+
+        let mut pages = vec![WizardPage::Welcome];
+        if has_license { pages.push(WizardPage::License); }
+        pages.push(WizardPage::Directory);
+        if has_components { pages.push(WizardPage::Components); }
+        pages.push(WizardPage::Installing);
+        pages.push(WizardPage::Finished);
+
+        let data = Box::new(WizardData {
+            app_name: app_name.to_string(), version: version.to_string(),
+            default_dir: default_dir.to_string(), install_dir: default_dir.to_string(),
+            license_text: license_text.to_string(), accent_rgb,
+            pages, page_idx: 0, selected_components: Vec::new(),
+            all_components: components.to_vec(), launch_after: false,
+            h_page_title: HWND::default(), h_page_desc: HWND::default(),
+            h_sidebar_title: HWND::default(), h_sidebar_ver: HWND::default(),
+            h_license: HWND::default(), h_dir_edit: HWND::default(),
+            h_browse: HWND::default(), h_components: HWND::default(),
+            h_progress: HWND::default(), h_file_label: HWND::default(),
+            h_launch_chk: HWND::default(), h_back: HWND::default(),
+            h_next: HWND::default(), h_cancel: HWND::default(),
+        });
+        let data_ptr = Box::into_raw(data);
+
+        let class_name = w!("VelocityWizard");
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(wizard_wnd_proc),
+            hInstance: hi,
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hbrBackground: HBRUSH((COLOR_BTNFACE.0 as i32 + 1) as *mut _),
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+        let _ = RegisterClassExW(&wc);
+
+        let win_w = 500i32;
+        let win_h = 380i32;
+
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            class_name,
+            PCWSTR(title_w.as_ptr()),
+            WS_OVERLAPPEDWINDOW & !(WS_THICKFRAME | WS_MAXIMIZEBOX),
+            CW_USEDEFAULT, CW_USEDEFAULT, win_w, win_h,
+            None, None,
+            hi,
+            Some(data_ptr as *mut _),
+        );
+
+        match hwnd {
+            Ok(hwnd) => {
+                let sw = GetSystemMetrics(SM_CXSCREEN);
+                let sh = GetSystemMetrics(SM_CYSCREEN);
+                let _ = SetWindowPos(hwnd, None, (sw - win_w) / 2, (sh - win_h) / 2, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).into() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            Err(_) => {
+                let _ = Box::from_raw(data_ptr);
+                return Ok(NativeWizardResult {
+                    install_dir: PathBuf::from(default_dir), cancelled: true,
+                    launch_after: false, selected_components: Vec::new(),
+                });
+            }
+        }
+
+        let data = Box::from_raw(data_ptr);
+        Ok(NativeWizardResult {
+            install_dir: PathBuf::from(&data.install_dir),
+            cancelled: false, launch_after: data.launch_after,
+            selected_components: data.selected_components,
+        })
+    }
+}
+
+unsafe extern "system" fn wizard_wnd_proc(
+    hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM,
+) -> LRESULT {
+    let dp = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WizardData;
+
+    match msg {
+        WM_CREATE => {
+            let cs = &*(lparam.0 as *const CREATESTRUCTW);
+            let p = cs.lpCreateParams as *mut WizardData;
+            if p.is_null() { return LRESULT(-1); }
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, p as isize);
+            create_controls(hwnd, &mut *p);
+            show_page(hwnd, &mut *p);
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            if !dp.is_null() { paint_sidebar(hwnd, &*dp); }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_CTLCOLORSTATIC => {
+            let hdc = HDC(wparam.0 as *mut _);
+            let target = HWND(lparam.0 as *mut _);
+            if !dp.is_null() {
+                let d = &*dp;
+                if target == d.h_page_title || target == d.h_page_desc {
+                    SetTextColor(hdc, COLORREF(0x00FFFFFF));
+                    SetBkMode(hdc, TRANSPARENT);
+                    let rgb = d.accent_rgb;
+                    let brush = CreateSolidBrush(COLORREF(rgb[0] as u32 | (rgb[1] as u32) << 8 | (rgb[2] as u32) << 16));
+                    return LRESULT(HBRUSH(brush.0).0 as isize);
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_COMMAND => {
+            if dp.is_null() { return LRESULT(0); }
+            let id = (wparam.0 & 0xFFFF) as u16;
+            let d = &mut *dp;
+            match id {
+                BTN_BACK => {
+                    if d.page_idx > 0 { d.page_idx -= 1; show_page(hwnd, d); }
+                }
+                BTN_NEXT => handle_next(hwnd, d),
+                BTN_CANCEL => {
+                    let mw = wn("Are you sure you want to cancel?");
+                    let tw = wn("Confirm Exit");
+                    let r = MessageBoxW(hwnd, PCWSTR(mw.as_ptr()), PCWSTR(tw.as_ptr()), MB_YESNO | MB_ICONQUESTION);
+                    if r == IDYES { let _ = DestroyWindow(hwnd); }
+                }
+                BTN_BROWSE => {
+                    if let Some(dir) = browse_directory(hwnd, &d.app_name) {
+                        d.install_dir = dir.clone();
+                        let w = wn(&dir);
+                        let _ = SetWindowTextW(d.h_dir_edit, PCWSTR(w.as_ptr()));
+                    }
+                }
+                _ => {}
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => { PostQuitMessage(0); LRESULT(0) }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+/// Helper to combine window styles from different style types.
+fn ws(val: u32) -> WINDOW_STYLE { WINDOW_STYLE(val) }
+
+unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
+    let hi = HINSTANCE(
+        windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
+            .unwrap_or_default().0
+    );
+
+    // Sidebar title
+    let t = wn(&format!("{} Setup", d.app_name));
+    d.h_sidebar_title = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), PCWSTR(t.as_ptr()),
+        WS_CHILD | WS_VISIBLE,
+        12, 20, 126, 40, parent, HMENU(200usize as *mut _), hi, None,
+    ).unwrap_or_default();
+    set_font(d.h_sidebar_title, true);
+
+    // Sidebar version
+    let v = wn(&d.version);
+    d.h_sidebar_ver = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), PCWSTR(v.as_ptr()),
+        WS_CHILD | WS_VISIBLE,
+        12, 65, 126, 20, parent, HMENU(201usize as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Page title
+    d.h_page_title = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), w!("Welcome"),
+        WS_CHILD | WS_VISIBLE,
+        162, 12, 320, 24, parent, HMENU(PAGE_TITLE_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+    set_font(d.h_page_title, true);
+
+    // Page description
+    d.h_page_desc = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), w!("Click Next to begin."),
+        WS_CHILD | WS_VISIBLE,
+        162, 38, 320, 20, parent, HMENU(PAGE_DESC_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // License edit (hidden) - combine WS_* and ES_* as raw u32
+    let license_style = ws(WS_CHILD.0 | WS_VSCROLL.0 | 0x0004 | 0x0800 | 0x0040); // ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL
+    d.h_license = CreateWindowExW(
+        WS_EX_CLIENTEDGE, w!("EDIT"), w!(""),
+        license_style,
+        162, 62, 320, 230, parent, HMENU(EDIT_LICENSE_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Dir edit (hidden)
+    let dw = wn(&d.default_dir);
+    let dir_style = ws(WS_CHILD.0 | 0x0080); // ES_AUTOHSCROLL
+    d.h_dir_edit = CreateWindowExW(
+        WS_EX_CLIENTEDGE, w!("EDIT"), PCWSTR(dw.as_ptr()),
+        dir_style,
+        162, 80, 240, 24, parent, HMENU(EDIT_DIR_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Browse button (hidden)
+    d.h_browse = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("B&rowse..."),
+        WS_CHILD | WS_TABSTOP,
+        410, 80, 72, 24, parent, HMENU(BTN_BROWSE as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Components listbox (hidden)
+    let lb_style = ws(WS_CHILD.0 | WS_VSCROLL.0 | 0x0008 | 0x0001); // LBS_MULTIPLESEL|LBS_NOTIFY
+    d.h_components = CreateWindowExW(
+        WS_EX_CLIENTEDGE, w!("LISTBOX"), w!(""),
+        lb_style,
+        162, 62, 320, 230, parent, HMENU(LIST_COMPONENTS_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+    for comp in &d.all_components {
+        let cw = wn(comp);
+        SendMessageW(d.h_components, LB_ADDSTRING, WPARAM(0), LPARAM(cw.as_ptr() as isize));
+    }
+
+    // Progress bar (hidden)
+    d.h_progress = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("msctls_progress32"), w!(""),
+        WS_CHILD,
+        162, 100, 320, 24, parent, HMENU(PROGRESS_BAR_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+    SendMessageW(d.h_progress, PBM_SETRANGE32, WPARAM(0), LPARAM(100));
+
+    // File label (hidden)
+    d.h_file_label = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("STATIC"), w!(""),
+        WS_CHILD,
+        162, 130, 320, 16, parent, HMENU(STATIC_FILE_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Launch checkbox (hidden) - combine WS_* and BS_* as raw u32
+    let chk_style = ws(WS_CHILD.0 | WS_TABSTOP.0 | 0x00000003); // BS_AUTOCHECKBOX
+    d.h_launch_chk = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("Launch application after install"),
+        chk_style,
+        162, 80, 250, 20, parent, HMENU(CHK_LAUNCH_ID as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    // Navigation buttons
+    d.h_back = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("< &Back"),
+        WS_CHILD | WS_TABSTOP,
+        240, 320, 80, 28, parent, HMENU(BTN_BACK as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    d.h_next = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("&Next >"),
+        ws(WS_CHILD.0 | WS_TABSTOP.0 | 0x00000001), // BS_DEFPUSHBUTTON
+        326, 320, 80, 28, parent, HMENU(BTN_NEXT as *mut _), hi, None,
+    ).unwrap_or_default();
+
+    d.h_cancel = CreateWindowExW(
+        WINDOW_EX_STYLE::default(), w!("BUTTON"), w!("Cancel"),
+        WS_CHILD | WS_TABSTOP,
+        412, 320, 80, 28, parent, HMENU(BTN_CANCEL as *mut _), hi, None,
+    ).unwrap_or_default();
+}
+
+unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
+    let page = d.pages[d.page_idx];
+    let is_first = d.page_idx == 0;
+    let is_install = page == WizardPage::Installing;
+    let is_last = d.page_idx == d.pages.len() - 1;
+
+    // Use ShowWindow to hide/show instead of EnableWindow (not available in current features)
+    if is_first || is_install {
+        let _ = ShowWindow(d.h_back, SW_HIDE);
+    } else {
+        let _ = ShowWindow(d.h_back, SW_SHOW);
+    }
+    if is_install {
+        let _ = ShowWindow(d.h_cancel, SW_HIDE);
+    } else {
+        let _ = ShowWindow(d.h_cancel, SW_SHOW);
+    }
+
+    let next_text = if is_last { "&Finish" }
+        else if is_install { "&Cancel" }
+        else if d.page_idx == d.pages.len() - 2 { "&Install" }
+        else { "&Next >" };
+    let nw = wn(next_text);
+    let _ = SetWindowTextW(d.h_next, PCWSTR(nw.as_ptr()));
+
+    // Hide all page-specific controls
+    for &ctrl in &[d.h_license, d.h_dir_edit, d.h_browse, d.h_components, d.h_progress, d.h_file_label, d.h_launch_chk] {
+        let _ = ShowWindow(ctrl, SW_HIDE);
+    }
+
+    match page {
+        WizardPage::Welcome => {
+            set_txt(d.h_page_title, "Welcome");
+            set_txt(d.h_page_desc, &format!("Welcome to {} {} Setup.\r\nClick Next to continue.", d.app_name, d.version));
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+        }
+        WizardPage::License => {
+            set_txt(d.h_page_title, "License Agreement");
+            set_txt(d.h_page_desc, "Please review the license terms.");
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+            set_txt(d.h_license, &d.license_text);
+            show_c(d.h_license);
+        }
+        WizardPage::Directory => {
+            set_txt(d.h_page_title, "Select Destination");
+            set_txt(d.h_page_desc, "Where should the application be installed?");
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+            set_txt(d.h_dir_edit, &d.install_dir);
+            show_c(d.h_dir_edit); show_c(d.h_browse);
+        }
+        WizardPage::Components => {
+            set_txt(d.h_page_title, "Select Components");
+            set_txt(d.h_page_desc, "Select the components to install:");
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+            show_c(d.h_components);
+        }
+        WizardPage::Installing => {
+            set_txt(d.h_page_title, "Installing");
+            set_txt(d.h_page_desc, "Please wait while the application is installed.");
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+            show_c(d.h_progress); show_c(d.h_file_label);
+        }
+        WizardPage::Finished => {
+            set_txt(d.h_page_title, "Installation Complete");
+            set_txt(d.h_page_desc, &format!("{} {} has been successfully installed.", d.app_name, d.version));
+            show_c(d.h_page_title); show_c(d.h_page_desc);
+            show_c(d.h_launch_chk);
+        }
+    }
+    let _ = InvalidateRect(hwnd, None, true);
+}
+
+unsafe fn show_c(h: HWND) { let _ = ShowWindow(h, SW_SHOW); }
+
+unsafe fn set_txt(h: HWND, s: &str) {
+    let w = wn(s);
+    let _ = SetWindowTextW(h, PCWSTR(w.as_ptr()));
+}
+
+unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
+    let page = d.pages[d.page_idx];
+    match page {
+        WizardPage::Directory => {
+            let mut buf = [0u16; 1024];
+            let len = GetWindowTextW(d.h_dir_edit, &mut buf);
+            let dir = String::from_utf16_lossy(&buf[..len as usize]);
+            if !dir.trim().is_empty() { d.install_dir = dir; }
+            d.page_idx += 1;
+            show_page(hwnd, d);
+        }
+        WizardPage::Components => {
+            d.selected_components.clear();
+            let count = SendMessageW(d.h_components, LB_GETSELCOUNT, WPARAM(0), LPARAM(0)).0 as i32;
+            if count > 0 {
+                let mut indices = vec![0i32; count as usize];
+                let got = SendMessageW(
+                    d.h_components, LB_GETSELITEMS,
+                    WPARAM(count as usize), LPARAM(indices.as_mut_ptr() as isize),
+                ).0 as i32;
+                for i in 0..got as usize {
+                    let idx = indices[i] as usize;
+                    if idx < d.all_components.len() {
+                        d.selected_components.push(d.all_components[idx].clone());
+                    }
+                }
+            }
+            d.page_idx += 1;
+            show_page(hwnd, d);
+        }
+        WizardPage::Finished => {
+            let chk = SendMessageW(d.h_launch_chk, BM_GETCHECK, WPARAM(0), LPARAM(0));
+            d.launch_after = chk.0 == 1; // BST_CHECKED = 1
+            let _ = DestroyWindow(hwnd);
+        }
+        _ => {
+            if d.page_idx < d.pages.len() - 1 {
+                d.page_idx += 1;
+                show_page(hwnd, d);
+            }
+        }
+    }
+}
+
+unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {
+    let mut ps = PAINTSTRUCT::default();
+    let hdc = BeginPaint(hwnd, &mut ps);
+    let rgb = d.accent_rgb;
+    let color = COLORREF(rgb[0] as u32 | (rgb[1] as u32) << 8 | (rgb[2] as u32) << 16);
+    let brush = CreateSolidBrush(color);
+    let rect = RECT { left: 0, top: 0, right: 150, bottom: 380 };
+    let _ = FillRect(hdc, &rect, brush);
+    SetTextColor(hdc, COLORREF(0x00FFFFFF));
+    SetBkMode(hdc, TRANSPARENT);
+    let brand = wn(&format!("{}\n{}", d.app_name, d.version));
+    let mut br = RECT { left: 12, top: 20, right: 138, bottom: 100 };
+    // DrawTextW in windows 0.58 takes (&mut [u16]) not separate ptr+len
+    let brand_slice: &mut [u16] = &mut brand.clone();
+    let _ = DrawTextW(hdc, brand_slice, &mut br, DT_LEFT | DT_TOP | DT_WORDBREAK);
+    let _ = DeleteObject(brush);
+    let _ = EndPaint(hwnd, &ps);
+}
+
+unsafe fn browse_directory(parent: HWND, app_name: &str) -> Option<String> {
+    use windows::Win32::System::Com::*;
+    use windows::Win32::UI::Shell::*;
+    let _ = CoInitialize(None).ok();
+    let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+    dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+    let tw = wn(&format!("Select installation directory for {}", app_name));
+    dialog.SetTitle(PCWSTR(tw.as_ptr())).ok()?;
+    match dialog.Show(parent) {
+        Ok(()) => {
+            let item = dialog.GetResult().ok()?;
+            let path = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            let s = path.to_string().ok()?;
+            let _ = CoTaskMemFree(Some(path.0 as *mut _));
+            Some(s)
+        }
+        Err(_) => None,
+    }
+}
+
+unsafe fn set_font(hwnd: HWND, bold: bool) {
+    let weight = if bold { 700 } else { 400 }; // FW_BOLD=700, FW_NORMAL=400
+    let font = CreateFontW(
+        16, 0, 0, 0, weight,
+        0, 0, 0,
+        1, // DEFAULT_CHARSET
+        0, // OUT_DEFAULT_PRECIS
+        0, // CLIP_DEFAULT_PRECIS
+        0, // DEFAULT_QUALITY
+        0, // DEFAULT_PITCH | FF_DONTCARE
+        w!("Segoe UI"),
+    );
+    let _ = SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+}
+
+/// Create a console-based progress window.
+pub fn create_install_progress_window(app_name: &str) -> InstallProgressWindow {
+    info!("Creating install progress window for: {}", app_name);
+    println!();
+    println!("  {} Setup - Installing", app_name);
+    println!("  {}", "=".repeat(50));
+    InstallProgressWindow { app_name: app_name.to_string(), last_pct: 0 }
+}
+
+/// Console progress display handle.
+pub struct InstallProgressWindow {
+    app_name: String,
+    last_pct: u32,
+}
+
+impl InstallProgressWindow {
+    pub fn update(&mut self, percent: u32, file_name: &str) {
+        if percent >= self.last_pct + 2 || percent >= 100 {
+            self.last_pct = percent;
+            let bw = 40usize;
+            let f = (percent as usize * bw) / 100;
+            let e = bw - f;
+            let bar: String = std::iter::repeat('█').take(f).chain(std::iter::repeat('░').take(e)).collect();
+            let dn = if file_name.len() > 35 { format!("...{}", &file_name[file_name.len()-32..]) } else { file_name.to_string() };
+            print!("\r  [{}] {:3}%  {:<35}", bar, percent, dn);
+            if percent >= 100 { println!(); }
+        }
+    }
+    pub fn complete(&mut self) {
+        self.last_pct = 100;
+        println!("  {}", "=".repeat(50));
+        println!("  {} installation complete!", self.app_name);
+    }
+}
+
+impl Drop for InstallProgressWindow {
+    fn drop(&mut self) { println!(); }
+}

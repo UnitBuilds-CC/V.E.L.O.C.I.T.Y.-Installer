@@ -179,6 +179,12 @@ fn show_license_dialog(app_name: &str, license_text: &str) -> DialogAction {
 }
 
 /// Show a directory selection dialog using the Windows folder browser.
+/// Public version for use by the native wizard.
+pub fn show_directory_dialog_pub(app_name: &str, default_dir: &str) -> Result<String> {
+    show_directory_dialog(app_name, default_dir)
+}
+
+/// Show a directory selection dialog using the Windows folder browser.
 fn show_directory_dialog(app_name: &str, default_dir: &str) -> Result<String> {
     use windows::core::*;
     use windows::Win32::System::Com::*;
