@@ -19,14 +19,15 @@ pub fn run(
     }
 
     // Find signtool.exe
-    let signtool = find_signtool();
-    if signtool.is_none() {
-        anyhow::bail!(
-            "signtool.exe not found. Install the Windows SDK or Windows Driver Kit (WDK) \
-             to get signtool.exe, or add it to your PATH."
-        );
-    }
-    let signtool = signtool.unwrap();
+    let signtool = match find_signtool() {
+        Some(path) => path,
+        None => {
+            anyhow::bail!(
+                "signtool.exe not found. Install the Windows SDK or Windows Driver Kit (WDK) \
+                 to get signtool.exe, or add it to your PATH."
+            );
+        }
+    };
 
     println!("Signing: {}", installer_path);
 
@@ -93,11 +94,10 @@ pub fn verify(installer_path: &str) -> Result<()> {
         anyhow::bail!("File not found: {}", installer_path);
     }
 
-    let signtool = find_signtool();
-    if signtool.is_none() {
-        anyhow::bail!("signtool.exe not found.");
-    }
-    let signtool = signtool.unwrap();
+    let signtool = match find_signtool() {
+        Some(path) => path,
+        None => anyhow::bail!("signtool.exe not found."),
+    };
 
     println!("Verifying signature: {}", installer_path);
 

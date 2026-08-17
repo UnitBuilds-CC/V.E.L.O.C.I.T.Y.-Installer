@@ -128,7 +128,9 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(filter.parse().unwrap()),
+                .add_directive(filter.parse().unwrap_or_else(|_| {
+                    tracing_subscriber::filter::LevelFilter::INFO.into()
+                })),
         )
         .init();
 
