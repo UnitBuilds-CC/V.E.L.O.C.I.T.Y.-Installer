@@ -1,0 +1,15 @@
+[package]
+name = "velocity-ui"
+description = "Installer wizard UI for Velocity Installer — modern and classic themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+velocity-config = { workspace = true }
+velocity-core = { workspace = true }
+windows = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

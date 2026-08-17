@@ -1,0 +1,22 @@
+[package]
+name = "velocity-core"
+description = "Core engine for Velocity Installer — file extraction, registry, shortcuts, services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+velocity-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }
+tar = { workspace = true }
+windows = { workspace = true }
+winreg = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/velocity-cli",
+    "crates/velocity-core",
+    "crates/velocity-config",
+    "crates/velocity-ui",
+    "crates/velocity-compiler",
+    "crates/velocity-runtime",
+    "crates/velocity-plugin-api",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/UnitBuilds-CC/V.E.L.O.C.I.T.Y.-Installer"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Compression
+zstd = "0.13"
+tar = "0.4"
+
+# Windows APIs
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Shutdown",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+] }
+winreg = "0.52"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Filesystem
+glob = "0.3"
+walkdir = "2"
+
+# Misc
+sha2 = "0.10"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+
+# Internal crates
+velocity-config = { path = "crates/velocity-config" }
+velocity-core = { path = "crates/velocity-core" }
+velocity-ui = { path = "crates/velocity-ui" }
+velocity-compiler = { path = "crates/velocity-compiler" }
+velocity-plugin-api = { path = "crates/velocity-plugin-api" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

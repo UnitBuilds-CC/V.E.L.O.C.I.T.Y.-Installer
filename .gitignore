@@ -1,0 +1,22 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Velocity build artifacts
+*.vel
+*.velpkg
+
+# Environment
+.env
+.env.local

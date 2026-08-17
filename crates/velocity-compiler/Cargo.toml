@@ -1,0 +1,20 @@
+[package]
+name = "velocity-compiler"
+description = "Compiles Velocity Installer packages into standalone .exe files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+velocity-config = { workspace = true }
+velocity-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }
+tar = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+sha2 = { workspace = true }

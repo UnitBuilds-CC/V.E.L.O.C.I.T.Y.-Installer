@@ -1,0 +1,15 @@
+[package]
+name = "velocity-plugin-api"
+description = "Plugin trait and SDK for Velocity Installer custom actions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+velocity-config = { workspace = true }
+velocity-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
