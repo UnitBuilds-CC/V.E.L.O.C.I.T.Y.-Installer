@@ -196,6 +196,7 @@ fn detect_files(project_dir: &Path) -> Result<FilesConfig> {
         base_dir: Some(project_dir.to_path_buf()),
         mappings: Vec::new(),
         exclude: exclude_patterns,
+        compression: Default::default(),
     })
 }
 

@@ -184,6 +184,38 @@ pub struct FilesConfig {
     /// Files/directories to exclude
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// Compression settings for the payload
+    #[serde(default)]
+    pub compression: CompressionConfig,
+}
+
+/// Compression configuration for the installer payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompressionConfig {
+    /// Compression format: "zstd" (default, fast) or "lzma2" (smaller, slower)
+    #[serde(default = "default_compression_format")]
+    pub format: String,
+    /// Compression level (1-22 for zstd, 1-9 for lzma2). Higher = smaller but slower.
+    /// Recommended: 3 for dev builds, 9-15 for release builds.
+    #[serde(default = "default_compression_level")]
+    pub level: i32,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            format: default_compression_format(),
+            level: default_compression_level(),
+        }
+    }
+}
+
+fn default_compression_format() -> String {
+    "zstd".to_string()
+}
+
+fn default_compression_level() -> i32 {
+    3
 }
 
 /// Explicit source-to-destination file mapping.

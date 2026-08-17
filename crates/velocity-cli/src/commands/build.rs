@@ -17,7 +17,21 @@ pub fn run(
         .map(PathBuf::from)
         .unwrap_or_else(|| project_dir.join("output").join("installer.exe"));
 
-    let format = compression_format.unwrap_or_else(|| "zstd".to_string());
+    // Load config to get compression settings
+    let config_path = project_dir.join("velocity.toml");
+    let (format, level) = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path).context("Failed to read velocity.toml")?;
+        let manifest: velocity_config::VelocityManifest = toml::from_str(&content).context("Failed to parse velocity.toml")?;
+        
+        // CLI flags override config
+        let format = compression_format.unwrap_or(manifest.files.compression.format);
+        let level = if compression != 3 { compression } else { manifest.files.compression.level };
+        (format, level)
+    } else {
+        // No config, use CLI flags or defaults
+        let format = compression_format.unwrap_or_else(|| "zstd".to_string());
+        (format, compression)
+    };
 
     if !quiet {
         println!();
@@ -25,7 +39,7 @@ pub fn run(
         println!(
             "  Compression: {} (level {})",
             format,
-            compression.clamp(0, 22)
+            level.clamp(0, 22)
         );
         println!();
     }
@@ -33,7 +47,7 @@ pub fn run(
     let options = velocity_compiler::BuildOptions {
         project_dir,
         output_path: output_path.clone(),
-        compression_level: compression.clamp(0, 22),
+        compression_level: level.clamp(0, 22),
         compression_format: format,
         runtime_path: runtime.map(PathBuf::from),
         quiet,

@@ -133,6 +133,7 @@ fn create_default_manifest(name: &str) -> velocity_config::VelocityManifest {
                 "velocity.toml".to_string(),
                 "output/**".to_string(),
             ],
+            compression: Default::default(),
         },
         shortcuts: velocity_config::ShortcutConfig {
             desktop: true,

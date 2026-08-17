@@ -36,6 +36,14 @@ reboot_handling = "auto"
 source = ["files/bin/*", "files/docs/*", "files/sdk/*", "files/samples/*"]
 exclude = ["*.pdb", "*.tmp", "*.log"]
 
+# Compression settings for the installer payload
+# Format: "zstd" (fast, recommended) or "lzma2" (smaller, slower)
+# Level: 1-22 for zstd, 1-9 for lzma2. Higher = smaller but slower.
+# Recommended: 3 for dev builds, 9-15 for release builds.
+[files.compression]
+format = "zstd"
+level = 3
+
 # --- Components (user-selectable) ---
 [[components]]
 id = "core"
