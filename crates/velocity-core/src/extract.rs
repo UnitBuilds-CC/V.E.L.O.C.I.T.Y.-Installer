@@ -116,3 +116,83 @@ pub fn create_archive(
     info!("Archive size: {} bytes (from {} bytes)", compressed.len(), tar_data.len());
     Ok(compressed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_and_extract_archive() {
+        // Create temp files
+        let temp_dir = std::env::temp_dir().join("velocity_test_archive");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create test files
+        let file1 = temp_dir.join("test1.txt");
+        let file2 = temp_dir.join("test2.txt");
+        std::fs::write(&file1, "Hello, Velocity!").unwrap();
+        std::fs::write(&file2, "Installer test data").unwrap();
+
+        let files = vec![
+            (file1.clone(), "test1.txt".to_string()),
+            (file2.clone(), "subdir/test2.txt".to_string()),
+        ];
+
+        // Create archive
+        let archive = create_archive(&files, 3).unwrap();
+        assert!(!archive.is_empty());
+
+        // Extract archive
+        let extract_dir = temp_dir.join("extracted");
+        let extracted = extract_archive(&archive, &extract_dir, None).unwrap();
+        assert_eq!(extracted.len(), 2);
+
+        // Verify contents
+        let content1 = std::fs::read_to_string(extract_dir.join("test1.txt")).unwrap();
+        assert_eq!(content1, "Hello, Velocity!");
+
+        let content2 = std::fs::read_to_string(extract_dir.join("subdir/test2.txt")).unwrap();
+        assert_eq!(content2, "Installer test data");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_with_progress() {
+        let temp_dir = std::env::temp_dir().join("velocity_test_progress");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let file1 = temp_dir.join("progress_test.txt");
+        std::fs::write(&file1, "Progress test").unwrap();
+
+        let files = vec![(file1, "progress_test.txt".to_string())];
+        let archive = create_archive(&files, 1).unwrap();
+
+        let extract_dir = temp_dir.join("extracted");
+        let cb: ProgressCallback = Box::new(|_current, _total, _name| {
+            // Progress callback verified by successful extraction
+        });
+
+        let extracted = extract_archive(&archive, &extract_dir, Some(&cb)).unwrap();
+        assert_eq!(extracted.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_empty_archive() {
+        let files: Vec<(PathBuf, String)> = vec![];
+        let archive = create_archive(&files, 3).unwrap();
+        assert!(!archive.is_empty()); // zstd header at minimum
+
+        let extract_dir = std::env::temp_dir().join("velocity_test_empty");
+        let _ = std::fs::remove_dir_all(&extract_dir);
+        let extracted = extract_archive(&archive, &extract_dir, None).unwrap();
+        assert_eq!(extracted.len(), 0);
+
+        let _ = std::fs::remove_dir_all(&extract_dir);
+    }
+}

@@ -18,6 +18,7 @@ pub mod disk_space;
 pub mod rollback;
 pub mod file_assoc;
 pub mod process_detect;
+pub mod pe_icon;
 pub mod error;
 
 pub use error::*;

@@ -98,6 +98,34 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         &options.output_path,
     )?;
 
+    // Step 8: Set custom icon if specified
+    if let Some(ref icon_path) = manifest.app.icon {
+        let full_icon_path = options.project_dir.join(icon_path);
+        if full_icon_path.exists() {
+            info!("Setting installer icon: {}", full_icon_path.display());
+            match velocity_core::pe_icon::set_exe_icon(&options.output_path, &full_icon_path) {
+                Ok(()) => info!("Icon set successfully"),
+                Err(e) => {
+                    tracing::warn!("Failed to set icon: {}", e);
+                }
+            }
+        } else {
+            tracing::warn!("Icon file not found: {}", full_icon_path.display());
+        }
+    }
+
+    // Step 9: Set version info
+    let default_desc = format!("{} Installer", manifest.app.name);
+    let description = manifest.app.description.as_deref()
+        .unwrap_or(&default_desc);
+    let _ = velocity_core::pe_icon::set_exe_version_info(
+        &options.output_path,
+        &manifest.app.version,
+        Some(&manifest.app.publisher),
+        Some(description),
+        None,
+    );
+
     let installer_size = std::fs::metadata(&options.output_path)?.len();
 
     info!(
