@@ -222,4 +222,110 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp);
     }
+
+    #[test]
+    fn test_rollback_reverse_order() {
+        // Verify that rollback processes operations in reverse order
+        let temp = std::env::temp_dir().join("velocity_test_rollback_order");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        // Create nested structure: dir -> subdir -> file
+        let dir_path = temp.join("outer");
+        let subdir_path = dir_path.join("inner");
+        let file_path = subdir_path.join("deep.txt");
+        std::fs::create_dir_all(&subdir_path).unwrap();
+        std::fs::write(&file_path, "deep").unwrap();
+
+        let mut tracker = RollbackTracker::new();
+        // Track in creation order: outer dir, inner dir, file
+        tracker.track_dir(dir_path.clone());
+        tracker.track_dir(subdir_path.clone());
+        tracker.track_file(file_path.clone());
+
+        // Rollback should process in reverse: file first, then inner dir, then outer dir
+        tracker.rollback().unwrap();
+
+        assert!(!file_path.exists(), "File should be removed first");
+        assert!(!subdir_path.exists(), "Inner dir should be removed second");
+        assert!(!dir_path.exists(), "Outer dir should be removed last");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_rollback_handles_missing_files() {
+        // Rollback should not fail if files are already gone
+        let temp = std::env::temp_dir().join("velocity_test_rollback_missing");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let file_path = temp.join("already_gone.txt");
+        // Don't actually create the file
+
+        let mut tracker = RollbackTracker::new();
+        tracker.track_file(file_path.clone());
+
+        // Should succeed even though file doesn't exist
+        tracker.rollback().unwrap();
+        assert_eq!(tracker.count(), 0);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_rollback_registry_and_env() {
+        // Test rollback of registry and env var operations
+        // (We use HKCU to avoid needing admin)
+        let mut tracker = RollbackTracker::new();
+
+        // Track a registry key and env var (these won't actually exist,
+        // but rollback should handle that gracefully)
+        tracker.track_registry("HKCU", "SOFTWARE\\VelocityTest_Rollback");
+        tracker.track_env_var("VELOCITY_TEST_ROLLBACK_VAR", "user");
+
+        assert_eq!(tracker.count(), 2);
+
+        // Should not panic even if keys/vars don't exist
+        tracker.rollback().unwrap();
+        assert_eq!(tracker.count(), 0);
+    }
+
+    #[test]
+    fn test_rollback_large_operation_count() {
+        // Stress test: rollback with many tracked operations
+        let temp = std::env::temp_dir().join("velocity_test_rollback_stress");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let mut tracker = RollbackTracker::new();
+
+        // Track 500 files and 50 directories
+        for i in 0..50 {
+            let dir = temp.join(format!("dir_{:03}", i));
+            std::fs::create_dir_all(&dir).unwrap();
+            tracker.track_dir(dir.clone());
+
+            for j in 0..10 {
+                let file = dir.join(format!("file_{:03}.txt", j));
+                std::fs::write(&file, format!("content {}", j)).unwrap();
+                tracker.track_file(file);
+            }
+        }
+
+        assert_eq!(tracker.count(), 550);
+
+        // Rollback should clean everything
+        tracker.rollback().unwrap();
+        assert_eq!(tracker.count(), 0);
+
+        // Verify all files and dirs are gone
+        let remaining: Vec<_> = std::fs::read_dir(&temp)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(remaining.len(), 0, "All files and dirs should be rolled back");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }
