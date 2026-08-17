@@ -42,6 +42,7 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 - **Language auto-detection** — Uses system locale by default
 
 ### Security Hardening
+- **AES-256-GCM encryption** — Authenticated encryption for installer payloads with password protection
 - **Secure temp directories** — Unique per-session directories with restricted access
 - **Path traversal protection** — Prevents zip-slip attacks in archives
 - **Null byte rejection** — Blocks null byte injection in paths
@@ -69,6 +70,11 @@ Velocity produces standalone `.exe` installers from a simple TOML configuration,
 - **Dual UI themes** — Modern (WebView2) or Classic (Win32) wizard, selectable per package
 - **Plugin API** — WASM-ready plugin trait with lifecycle hooks
 - **7-crate workspace** — Clean separation of concerns
+
+### Self-Update & Scripting
+- **HTTP self-update** — Checks a JSON endpoint for new versions at startup, notifies the user, and opens the download URL
+- **Structured scripting engine** — Variable substitution (`{install_dir}`, `{app_name}`), condition evaluation (`file_exists`, `dir_exists`, `action_success`), 7 action types (shell, copy, delete, mkdir, registry, env var), and configurable error policies (Abort, Continue, Retry)
+- **Component tree view** — Flattened hierarchy with indented display, disk space calculation, and dependency resolution
 
 ## Quick Start
 
@@ -206,6 +212,20 @@ handler = "myapp.exe"
 pre_install = ["echo Installing..."]
 post_install = ["echo Done!"]
 
+# Structured script actions (optional, supports copy, delete, mkdir, registry, env_var)
+[[scripts.post_install_actions]]
+name = "Create config directory"
+action = "mkdir"
+path = "{install_dir}\\config"
+on_error = "continue"
+
+[[scripts.post_install_actions]]
+name = "Copy default config"
+action = "copy"
+src = "{install_dir}\\defaults\\config.ini"
+dest = "{install_dir}\\config\\config.ini"
+condition = "file_missing:{install_dir}\\config\\config.ini"
+
 [uninstall]
 add_remove = true
 help_url = "https://support.myapp.com"
@@ -317,7 +337,7 @@ cargo build --release
 cargo test
 ```
 
-82 tests across all crates covering:
+162 tests across all crates covering:
 - Config parsing and validation (14 tests)
 - Archive creation and extraction (3 tests)
 - Payload format (1 test)
@@ -328,12 +348,17 @@ cargo test
 - Dependency condition resolution (9 tests)
 - Dependency installer command building (5 tests)
 - Security: path traversal, overwrite handling (8 tests)
-- Localization string resolution (8 tests)
+- Localization string resolution (10 tests)
 - Progress tracking and ETA (5 tests)
 - File association parsing (1 test)
 - Process detection (2 tests)
 - Uninstaller generation (2 tests)
 - Compiler integration (3 tests)
+- AES-256-GCM encryption (7 tests)
+- Self-update version parsing (5 tests)
+- Component tree view (7 tests)
+- Scripting engine (13 tests)
+- End-to-end integration (2 tests)
 
 ## Comparison
 
@@ -354,8 +379,9 @@ cargo test
 
 - [x] **Phase 1: Foundation** — Core engine, classic UI, TOML config, compiler, runtime
 - [x] **Phase 1.5: Robustness** — Dependency management, localization, security hardening, component selection, progress tracking
+- [x] **Phase 6: Hardening** — AES-256-GCM encryption, self-update mechanism, component tree view, structured scripting engine, end-to-end integration tests
 - [ ] **Phase 2: Modern UI** — WebView2-based wizard with dark/light themes, animations
-- [ ] **Phase 3: Advanced** — Auto-update, WASM plugins, delta compression
+- [ ] **Phase 3: Advanced** — WASM plugins, delta compression, full auto-update with download-and-swap
 - [ ] **Phase 4: Ecosystem** — GUI config editor, template marketplace, CI/CD integration
 
 ## License
