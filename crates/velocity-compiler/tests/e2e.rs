@@ -233,3 +233,270 @@ theme = "classic"
     let _ = std::fs::remove_dir_all(&temp);
     println!("Encrypted installer E2E test passed!");
 }
+
+/// Stress test: build and install with many files (1000+ files).
+#[test]
+#[ignore] // Requires pre-built runtime, takes ~30s
+fn test_stress_many_files() {
+    let temp = std::env::temp_dir().join("velocity_e2e_stress_many");
+    let project_dir = temp.join("project");
+    let install_dir = temp.join("install_output");
+
+    let _ = std::fs::remove_dir_all(&temp);
+
+    assert!(runtime_exe().exists(), "Runtime not found");
+    assert!(velocity_cli().exists(), "CLI not found");
+
+    // Create 1000 files across 10 directories
+    std::fs::create_dir_all(project_dir.join("bin")).unwrap();
+    for dir_idx in 0..10 {
+        let sub_dir = project_dir.join("bin").join(format!("subdir_{}", dir_idx));
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        for file_idx in 0..100 {
+            let file_path = sub_dir.join(format!("file_{:04}.dat", file_idx));
+            // Each file is 1KB of deterministic content
+            let content: Vec<u8> = (0..1024).map(|i| ((dir_idx * 100 + file_idx + i) % 256) as u8).collect();
+            std::fs::write(&file_path, &content).unwrap();
+        }
+    }
+
+    let toml = r#"
+[app]
+name = "Stress Many Files"
+version = "1.0.0"
+publisher = "Velocity CI"
+
+[install]
+default_dir = "{autopf}\\Stress Many Files"
+require_admin = false
+
+[files]
+source = ["bin/**/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[uninstall]
+add_remove = false
+
+[ui]
+theme = "classic"
+"#;
+    std::fs::write(project_dir.join("velocity.toml"), toml).unwrap();
+
+    let runtime_target = project_dir.join("target").join("release");
+    std::fs::create_dir_all(&runtime_target).unwrap();
+    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+
+    // Build
+    let output = Command::new(velocity_cli())
+        .args(["build"])
+        .current_dir(&project_dir)
+        .output()
+        .expect("Failed to run velocity build");
+    assert!(output.status.success(), "Stress build failed");
+
+    let installer = project_dir.join("output").join("installer.exe");
+    assert!(installer.exists());
+    let installer_size = std::fs::metadata(&installer).unwrap().len();
+    println!("Stress installer size: {} MB", installer_size / 1024 / 1024);
+
+    // Run installer
+    let run_output = Command::new(&installer)
+        .args(["/S", &format!("/D={}", install_dir.display())])
+        .output()
+        .expect("Failed to run stress installer");
+    assert!(run_output.status.success(), "Stress installer failed");
+
+    // Verify all 1000 files installed
+    let mut installed_count = 0;
+    for dir_idx in 0..10 {
+        for file_idx in 0..100 {
+            let file_path = install_dir.join("bin")
+                .join(format!("subdir_{}", dir_idx))
+                .join(format!("file_{:04}.dat", file_idx));
+            assert!(file_path.exists(), "Missing file: {:?}", file_path);
+
+            // Verify content
+            let content = std::fs::read(&file_path).unwrap();
+            assert_eq!(content.len(), 1024);
+            let expected: Vec<u8> = (0..1024).map(|i| ((dir_idx * 100 + file_idx + i) % 256) as u8).collect();
+            assert_eq!(content, expected);
+            installed_count += 1;
+        }
+    }
+    assert_eq!(installed_count, 1000);
+
+    let _ = std::fs::remove_dir_all(&temp);
+    println!("Stress test (1000 files) passed!");
+}
+
+/// Stress test: build and install with large individual files (10MB+ each).
+#[test]
+#[ignore] // Requires pre-built runtime, takes ~30s
+fn test_stress_large_files() {
+    let temp = std::env::temp_dir().join("velocity_e2e_stress_large");
+    let project_dir = temp.join("project");
+    let install_dir = temp.join("install_output");
+
+    let _ = std::fs::remove_dir_all(&temp);
+
+    assert!(runtime_exe().exists(), "Runtime not found");
+    assert!(velocity_cli().exists(), "CLI not found");
+
+    // Create 5 files of 10MB each (50MB total uncompressed)
+    std::fs::create_dir_all(project_dir.join("bin")).unwrap();
+    for i in 0..5 {
+        let file_path = project_dir.join("bin").join(format!("large_{:02}.bin", i));
+        // 10MB of deterministic pseudo-random data
+        let size = 10 * 1024 * 1024;
+        let content: Vec<u8> = (0..size).map(|j| ((i * 17 + j * 31) % 256) as u8).collect();
+        std::fs::write(&file_path, &content).unwrap();
+    }
+
+    let toml = r#"
+[app]
+name = "Stress Large Files"
+version = "1.0.0"
+publisher = "Velocity CI"
+
+[install]
+default_dir = "{autopf}\\Stress Large Files"
+require_admin = false
+
+[files]
+source = ["bin/**/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[uninstall]
+add_remove = false
+
+[ui]
+theme = "classic"
+"#;
+    std::fs::write(project_dir.join("velocity.toml"), toml).unwrap();
+
+    let runtime_target = project_dir.join("target").join("release");
+    std::fs::create_dir_all(&runtime_target).unwrap();
+    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+
+    // Build
+    let output = Command::new(velocity_cli())
+        .args(["build"])
+        .current_dir(&project_dir)
+        .output()
+        .expect("Failed to run velocity build");
+    assert!(output.status.success(), "Large file build failed");
+
+    let installer = project_dir.join("output").join("installer.exe");
+    let installer_size = std::fs::metadata(&installer).unwrap().len();
+    println!("Large file installer size: {} MB (from 50MB uncompressed)", installer_size / 1024 / 1024);
+
+    // Run installer
+    let run_output = Command::new(&installer)
+        .args(["/S", &format!("/D={}", install_dir.display())])
+        .output()
+        .expect("Failed to run large file installer");
+    assert!(run_output.status.success(), "Large file installer failed");
+
+    // Verify all 5 large files
+    for i in 0..5 {
+        let file_path = install_dir.join("bin").join(format!("large_{:02}.bin", i));
+        assert!(file_path.exists(), "Missing large file: {:?}", file_path);
+
+        let content = std::fs::read(&file_path).unwrap();
+        assert_eq!(content.len(), 10 * 1024 * 1024, "File size mismatch for large_{:02}.bin", i);
+
+        // Spot-check content integrity
+        let expected: Vec<u8> = (0..1024).map(|j| ((i * 17 + j * 31) % 256) as u8).collect();
+        assert_eq!(&content[..1024], &expected[..]);
+    }
+
+    let _ = std::fs::remove_dir_all(&temp);
+    println!("Stress test (50MB large files) passed!");
+}
+
+/// Stress test: Unicode filenames and paths.
+#[test]
+#[ignore] // Requires pre-built runtime
+fn test_stress_unicode() {
+    let temp = std::env::temp_dir().join("velocity_e2e_stress_unicode");
+    let project_dir = temp.join("project");
+    let install_dir = temp.join("install_output");
+
+    let _ = std::fs::remove_dir_all(&temp);
+
+    assert!(runtime_exe().exists(), "Runtime not found");
+    assert!(velocity_cli().exists(), "CLI not found");
+
+    // Create files with Unicode names
+    std::fs::create_dir_all(project_dir.join("bin")).unwrap();
+    std::fs::write(project_dir.join("bin").join("hello_世界.txt"), "Hello World in Chinese").unwrap();
+    std::fs::write(project_dir.join("bin").join("données.bin"), "French data file").unwrap();
+    std::fs::write(project_dir.join("bin").join("файл.txt"), "Russian file").unwrap();
+    std::fs::write(project_dir.join("bin").join("αρχείο.txt"), "Greek file").unwrap();
+    std::fs::write(project_dir.join("bin").join("file with spaces.txt"), "Spaces in name").unwrap();
+
+    let toml = r#"
+[app]
+name = "Unicode Test App"
+version = "1.0.0"
+publisher = "Velocity CI"
+
+[install]
+default_dir = "{autopf}\\Unicode Test App"
+require_admin = false
+
+[files]
+source = ["bin/**/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[uninstall]
+add_remove = false
+
+[ui]
+theme = "classic"
+"#;
+    std::fs::write(project_dir.join("velocity.toml"), toml).unwrap();
+
+    let runtime_target = project_dir.join("target").join("release");
+    std::fs::create_dir_all(&runtime_target).unwrap();
+    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+
+    // Build
+    let output = Command::new(velocity_cli())
+        .args(["build"])
+        .current_dir(&project_dir)
+        .output()
+        .expect("Failed to run velocity build");
+    assert!(output.status.success(), "Unicode build failed");
+
+    let installer = project_dir.join("output").join("installer.exe");
+
+    // Run installer
+    let run_output = Command::new(&installer)
+        .args(["/S", &format!("/D={}", install_dir.display())])
+        .output()
+        .expect("Failed to run Unicode installer");
+    assert!(run_output.status.success(), "Unicode installer failed");
+
+    // Verify Unicode-named files
+    assert!(install_dir.join("bin").join("hello_世界.txt").exists());
+    assert!(install_dir.join("bin").join("données.bin").exists());
+    assert!(install_dir.join("bin").join("файл.txt").exists());
+    assert!(install_dir.join("bin").join("αρχείο.txt").exists());
+    assert!(install_dir.join("bin").join("file with spaces.txt").exists());
+
+    let content = std::fs::read_to_string(install_dir.join("bin").join("hello_世界.txt")).unwrap();
+    assert_eq!(content, "Hello World in Chinese");
+
+    let _ = std::fs::remove_dir_all(&temp);
+    println!("Unicode stress test passed!");
+}
