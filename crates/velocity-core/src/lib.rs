@@ -24,6 +24,9 @@ pub mod dep_resolver;
 pub mod dep_installer;
 pub mod localization;
 pub mod security;
+pub mod arch_detect;
+pub mod condition;
+pub mod reboot;
 pub mod error;
 
 pub use error::*;
