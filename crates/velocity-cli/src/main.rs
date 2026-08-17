@@ -51,6 +51,10 @@ enum Commands {
         #[arg(long)]
         runtime: Option<String>,
 
+        /// Generate delta update package (requires previous version in output directory)
+        #[arg(long)]
+        delta: bool,
+
         /// Quiet mode (minimal output)
         #[arg(short, long)]
         quiet: bool,
@@ -155,9 +159,10 @@ fn main() -> Result<()> {
             compression,
             format,
             runtime,
+            delta,
             quiet,
         } => {
-            commands::build::run(output, compression, format, runtime, quiet)?;
+            commands::build::run(output, compression, format, runtime, delta, quiet)?;
         }
         Commands::Detect { dir } => {
             commands::detect::run(&dir)?;
