@@ -321,22 +321,35 @@ fn main() -> Result<()> {
     let _final_log = logging::move_log_to_install_dir(install_dir, &manifest.app.name).ok();
 
     // Step 6.5: Run pre-install scripts using the scripting engine
-    if !manifest.scripts.pre_install.is_empty() {
+    if !manifest.scripts.pre_install.is_empty() || !manifest.scripts.pre_install_actions.is_empty() {
         info!("Running pre-install scripts...");
-        logging::log_op("SCRIPT", &format!("Running {} pre-install script(s)", manifest.scripts.pre_install.len()));
-        let script_engine = velocity_core::scripting::ScriptEngine::new(
+        let total = manifest.scripts.pre_install.len() + manifest.scripts.pre_install_actions.len();
+        logging::log_op("SCRIPT", &format!("Running {} pre-install action(s)", total));
+        let mut script_engine = velocity_core::scripting::ScriptEngine::new(
             velocity_core::scripting::build_variable_context(
                 &install_dir.to_string_lossy(),
                 &manifest.app.name,
                 &manifest.app.version,
             ),
         );
+        // Execute simple shell commands
         let results = script_engine.execute_shell_commands(&manifest.scripts.pre_install);
         for r in &results {
             if r.success {
                 logging::log_success(&format!("Pre-install: {}", r.action_name));
             } else {
                 warn!("Pre-install script failed: {:?}", r.error);
+                logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
+            }
+        }
+        // Execute structured actions
+        let actions = velocity_core::scripting::configs_to_actions(&manifest.scripts.pre_install_actions);
+        let action_results = script_engine.execute_sequence(&actions);
+        for r in &action_results {
+            if r.success {
+                logging::log_success(&format!("Pre-install: {}", r.action_name));
+            } else {
+                warn!("Pre-install action failed: {:?}", r.error);
                 logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
             }
         }
@@ -676,22 +689,35 @@ fn main() -> Result<()> {
     }
 
     // Step 16: Run post-install scripts using the scripting engine
-    if !manifest.scripts.post_install.is_empty() {
+    if !manifest.scripts.post_install.is_empty() || !manifest.scripts.post_install_actions.is_empty() {
         info!("Running post-install scripts...");
-        logging::log_op("SCRIPT", &format!("Running {} post-install script(s)", manifest.scripts.post_install.len()));
-        let script_engine = velocity_core::scripting::ScriptEngine::new(
+        let total = manifest.scripts.post_install.len() + manifest.scripts.post_install_actions.len();
+        logging::log_op("SCRIPT", &format!("Running {} post-install action(s)", total));
+        let mut script_engine = velocity_core::scripting::ScriptEngine::new(
             velocity_core::scripting::build_variable_context(
                 &install_dir.to_string_lossy(),
                 &manifest.app.name,
                 &manifest.app.version,
             ),
         );
+        // Execute simple shell commands
         let results = script_engine.execute_shell_commands(&manifest.scripts.post_install);
         for r in &results {
             if r.success {
                 logging::log_success(&format!("Post-install: {}", r.action_name));
             } else {
                 warn!("Post-install script failed: {:?}", r.error);
+                logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
+            }
+        }
+        // Execute structured actions
+        let actions = velocity_core::scripting::configs_to_actions(&manifest.scripts.post_install_actions);
+        let action_results = script_engine.execute_sequence(&actions);
+        for r in &action_results {
+            if r.success {
+                logging::log_success(&format!("Post-install: {}", r.action_name));
+            } else {
+                warn!("Post-install action failed: {:?}", r.error);
                 logging::log_error("SCRIPT", &format!("{}: {:?}", r.action_name, r.error));
             }
         }

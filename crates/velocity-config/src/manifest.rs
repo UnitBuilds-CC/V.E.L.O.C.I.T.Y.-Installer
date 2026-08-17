@@ -357,10 +357,10 @@ pub struct PageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
 pub struct ScriptsConfig {
-    /// Commands to run before installation
+    /// Commands to run before installation (simple shell commands)
     #[serde(default)]
     pub pre_install: Vec<String>,
-    /// Commands to run after installation
+    /// Commands to run after installation (simple shell commands)
     #[serde(default)]
     pub post_install: Vec<String>,
     /// Commands to run before uninstallation
@@ -369,6 +369,74 @@ pub struct ScriptsConfig {
     /// Commands to run after uninstallation
     #[serde(default)]
     pub post_uninstall: Vec<String>,
+    /// Structured actions to run before installation (supports copy, delete, registry, etc.)
+    #[serde(default)]
+    pub pre_install_actions: Vec<ScriptActionConfig>,
+    /// Structured actions to run after installation
+    #[serde(default)]
+    pub post_install_actions: Vec<ScriptActionConfig>,
+}
+
+/// A structured script action definable in velocity.toml.
+///
+/// Supports multiple action types beyond simple shell commands:
+/// file copy, delete, mkdir, registry writes, and env var setting.
+///
+/// # Example
+/// ```toml
+/// [[scripts.pre_install_actions]]
+/// name = "Create config directory"
+/// action = "mkdir"
+/// path = "{install_dir}\\config"
+/// on_error = "continue"
+///
+/// [[scripts.post_install_actions]]
+/// name = "Copy default config"
+/// action = "copy"
+/// src = "{install_dir}\\defaults\\config.ini"
+/// dest = "{install_dir}\\config\\config.ini"
+/// condition = "file_missing:{install_dir}\\config\\config.ini"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScriptActionConfig {
+    /// Human-readable name / description
+    pub name: String,
+    /// Action type: "shell", "copy", "delete", "delete_dir", "mkdir", "registry", "env_var"
+    pub action: String,
+    /// Path argument (for delete, delete_dir, mkdir)
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Source path (for copy)
+    #[serde(default)]
+    pub src: Option<String>,
+    /// Destination path (for copy)
+    #[serde(default)]
+    pub dest: Option<String>,
+    /// Registry key (for registry action)
+    #[serde(default)]
+    pub key: Option<String>,
+    /// Registry value name (for registry action)
+    #[serde(default)]
+    pub value_name: Option<String>,
+    /// Registry/env var value
+    #[serde(default)]
+    pub value: Option<String>,
+    /// Environment variable name (for env_var action)
+    #[serde(default)]
+    pub env_name: Option<String>,
+    /// Scope for env var: "system" or "user" (default: "user")
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Condition expression (empty = always run)
+    #[serde(default)]
+    pub condition: Option<String>,
+    /// Error policy: "abort", "continue", or "retry:N"
+    #[serde(default = "default_error_policy")]
+    pub on_error: String,
+}
+
+fn default_error_policy() -> String {
+    "abort".to_string()
 }
 
 

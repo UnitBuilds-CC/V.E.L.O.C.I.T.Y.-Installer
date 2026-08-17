@@ -381,6 +381,73 @@ pub fn build_variable_context(
     vars
 }
 
+/// Convert a manifest `ScriptActionConfig` into a `ScriptAction` the engine can execute.
+///
+/// Returns `None` if the action type string is unrecognized (with a warning logged).
+pub fn config_to_action(
+    cfg: &velocity_config::ScriptActionConfig,
+) -> Option<ScriptAction> {
+    let action = match cfg.action.as_str() {
+        "shell" | "cmd" => {
+            let cmd = cfg.path.as_deref().unwrap_or("");
+            ActionType::ShellCommand(cmd.to_string())
+        }
+        "copy" => ActionType::CopyFile {
+            src: cfg.src.as_deref().unwrap_or("").to_string(),
+            dest: cfg.dest.as_deref().unwrap_or("").to_string(),
+        },
+        "delete" => ActionType::DeleteFile(
+            cfg.path.as_deref().unwrap_or("").to_string(),
+        ),
+        "delete_dir" | "rmdir" => ActionType::DeleteDir(
+            cfg.path.as_deref().unwrap_or("").to_string(),
+        ),
+        "mkdir" => ActionType::CreateDir(
+            cfg.path.as_deref().unwrap_or("").to_string(),
+        ),
+        "registry" => ActionType::WriteRegistry {
+            key: cfg.key.as_deref().unwrap_or("").to_string(),
+            name: cfg.value_name.as_deref().unwrap_or("").to_string(),
+            value: cfg.value.as_deref().unwrap_or("").to_string(),
+        },
+        "env_var" | "env" => ActionType::SetEnvVar {
+            name: cfg.env_name.as_deref().unwrap_or("").to_string(),
+            value: cfg.value.as_deref().unwrap_or("").to_string(),
+            scope: cfg.scope.as_deref().unwrap_or("user").to_string(),
+        },
+        other => {
+            warn!("Unknown script action type: '{}'", other);
+            return None;
+        }
+    };
+
+    let on_error = match cfg.on_error.as_str() {
+        "continue" => ErrorPolicy::Continue,
+        "abort" => ErrorPolicy::Abort,
+        s if s.starts_with("retry:") => {
+            let n = s.trim_start_matches("retry:").parse::<u32>().unwrap_or(3);
+            ErrorPolicy::Retry(n)
+        }
+        _ => ErrorPolicy::Abort,
+    };
+
+    Some(ScriptAction {
+        name: cfg.name.clone(),
+        action,
+        condition: cfg.condition.as_deref().unwrap_or("").to_string(),
+        on_error,
+        working_dir: None,
+    })
+}
+
+/// Convert a slice of manifest action configs into executable script actions.
+/// Skips unrecognized action types with a warning.
+pub fn configs_to_actions(
+    configs: &[velocity_config::ScriptActionConfig],
+) -> Vec<ScriptAction> {
+    configs.iter().filter_map(config_to_action).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
