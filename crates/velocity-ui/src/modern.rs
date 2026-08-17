@@ -95,6 +95,9 @@ enum JsMessage {
 /// Creates a Win32 window hosting a WebView2 control that renders the
 /// installer wizard UI. Communicates with the JavaScript frontend via
 /// JSON messages over the WebView2 RPC channel.
+///
+/// Returns `Err(UiError::WebView2NotAvailable)` if the WebView2 runtime
+/// is not installed, so the caller can fall back to the classic wizard.
 pub fn run_modern_wizard(
     app_name: &str,
     app_version: &str,
@@ -103,6 +106,12 @@ pub fn run_modern_wizard(
     license_text: &str,
     components: &[(String, String, String, f64, bool, bool)], // (id, name, desc, size_mb, selected, mandatory)
 ) -> std::result::Result<ModernWizardResult, UiError> {
+    // Check for WebView2 runtime before attempting to create any windows
+    if !is_webview2_runtime_installed() {
+        warn!("WebView2 runtime not detected on this system");
+        return Err(UiError::WebView2NotAvailable);
+    }
+
     info!(
         "Starting modern WebView2 wizard for {} v{}",
         app_name, app_version
@@ -167,6 +176,44 @@ fn detect_system_theme() -> String {
         },
         Err(_) => "light".to_string(),
     }
+}
+
+/// Check if the WebView2 Evergreen runtime is installed on this system.
+///
+/// Checks the registry for the WebView2 Evergreen Bootstrapper client key,
+/// which is present when the runtime has been installed (either standalone
+/// or via Evergreen distribution).
+///
+/// See: <https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution>
+pub fn is_webview2_runtime_installed() -> bool {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    // WebView2 Evergreen runtime client key (same GUID for both HKLM and HKCU)
+    let wv2_key = r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+    // Check HKLM first (machine-wide install), then HKCU (per-user install)
+    for root in &[HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        if RegKey::predef(*root).open_subkey(wv2_key).is_ok() {
+            info!("WebView2 runtime detected via registry ({:?})", root);
+            return true;
+        }
+    }
+
+    // Also check if the WebView2 loader DLL is available (fixed version runtime)
+    // This covers the case where someone bundled the runtime alongside the app
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    if let Some(dir) = exe_dir {
+        // Check for Microsoft.Web.WebView2.Core.dll in the app directory
+        if dir.join("Microsoft.Web.WebView2.Core.dll").exists() {
+            info!("WebView2 runtime detected via bundled DLL");
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Shared state between the Win32 window procedure and WebView2 callbacks.
@@ -268,7 +315,10 @@ fn run_wizard_window(
         };
 
         {
-            let mut h = shared.hwnd.lock().unwrap();
+            let mut h = shared
+                .hwnd
+                .lock()
+                .map_err(|_| UiError::Wizard("hwnd lock poisoned".into()))?;
             *h = hwnd;
         }
 
@@ -298,8 +348,8 @@ fn run_wizard_window(
                 }),
                 Box::new(move |error_code, environment| {
                     error_code?;
-                    tx.send(environment.ok_or_else(|| windows::core::Error::from(E_POINTER)))
-                        .expect("send environment");
+                    let _ =
+                        tx.send(environment.ok_or_else(|| windows::core::Error::from(E_POINTER)));
                     Ok(())
                 }),
             )
@@ -370,8 +420,8 @@ fn run_wizard_window(
                 }),
                 Box::new(move |error_code, controller| {
                     error_code?;
-                    tx.send(controller.ok_or_else(|| windows::core::Error::from(E_POINTER)))
-                        .expect("send controller");
+                    let _ =
+                        tx.send(controller.ok_or_else(|| windows::core::Error::from(E_POINTER)));
                     Ok(())
                 }),
             )
@@ -408,7 +458,10 @@ fn run_wizard_window(
 
         // Store controller
         {
-            let mut ctrl = shared.controller.lock().unwrap();
+            let mut ctrl = shared
+                .controller
+                .lock()
+                .map_err(|_| UiError::Wizard("controller lock poisoned".into()))?;
             *ctrl = Some(controller.clone());
         }
 
@@ -417,7 +470,10 @@ fn run_wizard_window(
         if let Ok(ref wv) = webview {
             // Store webview reference
             {
-                let mut wv_store = shared.webview.lock().unwrap();
+                let mut wv_store = shared
+                    .webview
+                    .lock()
+                    .map_err(|_| UiError::Wizard("webview lock poisoned".into()))?;
                 *wv_store = Some(wv.clone());
             }
 

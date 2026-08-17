@@ -115,6 +115,22 @@ pub fn log_success(message: &str) {
     log_op("OK", message);
 }
 
+/// Record an install outcome metric for telemetry.
+///
+/// Writes a single structured line to the install log that can be parsed
+/// by log aggregation tools to compute success/failure/cancel rates.
+///
+/// Outcome values: "success", "failed", "cancelled", "rolled_back"
+pub fn log_install_outcome(app_name: &str, version: &str, outcome: &str, duration_secs: u64) {
+    log_op(
+        "TELEMETRY",
+        &format!(
+            "app={} version={} outcome={} duration={}s",
+            app_name, version, outcome, duration_secs
+        ),
+    );
+}
+
 /// Get the current log file path.
 pub fn log_path() -> Option<PathBuf> {
     LOGGER

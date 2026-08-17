@@ -16,6 +16,9 @@ pub enum UiError {
 
     #[error("Wizard error: {0}")]
     Wizard(String),
+
+    #[error("WebView2 runtime is not installed")]
+    WebView2NotAvailable,
 }
 
 pub type Result<T> = std::result::Result<T, UiError>;

@@ -126,6 +126,11 @@ fn main() -> Result<()> {
         manifest.app.name, manifest.app.version
     );
 
+    // Track install duration for telemetry
+    let install_start = std::time::Instant::now();
+    let app_name_telem = manifest.app.name.clone();
+    let app_version_telem = manifest.app.version.clone();
+
     // Step 1.2: Check for updates (non-blocking, best-effort)
     if let Some(ref update_url) = manifest.uninstall.update_url {
         if !update_url.is_empty() && !args.silent {
@@ -276,6 +281,12 @@ fn main() -> Result<()> {
             Err(velocity_ui::UiError::Cancelled) => {
                 info!("Installation cancelled by user");
                 logging::log("Installation cancelled by user");
+                logging::log_install_outcome(
+                    &app_name_telem,
+                    &app_version_telem,
+                    "cancelled",
+                    install_start.elapsed().as_secs(),
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -461,6 +472,12 @@ fn main() -> Result<()> {
                 logging::log_error("EXTRACT", &e.to_string());
                 logging::log("Rolling back...");
                 let _ = rollback.rollback();
+                logging::log_install_outcome(
+                    &app_name_telem,
+                    &app_version_telem,
+                    "rolled_back",
+                    install_start.elapsed().as_secs(),
+                );
                 if !args.silent {
                     velocity_ui::classic::show_error(
                         "Installation Failed",
@@ -534,6 +551,12 @@ fn main() -> Result<()> {
             error!("Required dependency installation failed");
             logging::log_error("DEPS", "Required dependency failed, rolling back");
             let _ = rollback.rollback();
+            logging::log_install_outcome(
+                &app_name_telem,
+                &app_version_telem,
+                "rolled_back",
+                install_start.elapsed().as_secs(),
+            );
             if !args.silent {
                 velocity_ui::classic::show_error(
                     "Dependency Installation Failed",
@@ -827,6 +850,12 @@ fn main() -> Result<()> {
     // Installation successful — clear rollback tracker
     rollback.clear();
     logging::log_success("Installation completed successfully!");
+    logging::log_install_outcome(
+        &app_name_telem,
+        &app_version_telem,
+        "success",
+        install_start.elapsed().as_secs(),
+    );
 
     // Check if a reboot is needed (files locked during install)
     let reboot_needed = velocity_core::reboot::is_velocity_reboot_requested()

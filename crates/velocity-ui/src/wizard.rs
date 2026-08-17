@@ -116,26 +116,42 @@ fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .unwrap_or_default();
 
-    let result = modern::run_modern_wizard(
+    match modern::run_modern_wizard(
         &manifest.app.name,
         &manifest.app.version,
         &manifest.app.publisher,
         &manifest.install.default_dir,
         &license_text,
         &components,
-    )?;
-
-    if result.cancelled {
-        return Err(UiError::Cancelled);
+    ) {
+        Ok(result) => {
+            if result.cancelled {
+                return Err(UiError::Cancelled);
+            }
+            Ok(InstallWizardResult {
+                install_dir: result.install_dir,
+                cancelled: false,
+                launch_after: result.launch_after,
+                selected_components: result.selected_components,
+                install_completed: result.install_completed,
+            })
+        }
+        Err(UiError::WebView2NotAvailable) => {
+            tracing::warn!(
+                "WebView2 runtime not found — falling back to classic wizard for {}",
+                manifest.app.name
+            );
+            // Show an informational message to the user
+            crate::classic::show_message(
+                &format!("{} Setup", manifest.app.name),
+                "The modern wizard requires the Microsoft Edge WebView2 runtime.\n\n\
+                 Falling back to the classic wizard. To install WebView2, visit:\n\
+                 https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
+            );
+            run_classic(manifest)
+        }
+        Err(e) => Err(e),
     }
-
-    Ok(InstallWizardResult {
-        install_dir: result.install_dir,
-        cancelled: false,
-        launch_after: result.launch_after,
-        selected_components: result.selected_components,
-        install_completed: result.install_completed,
-    })
 }
 
 /// Progress tracker with ETA calculation.

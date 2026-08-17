@@ -232,12 +232,15 @@ pub fn restore_backup(backup_path: &Path, original_path: &Path) -> Result<()> {
 }
 
 /// Compute a SHA256 hash of a file for integrity verification.
+///
+/// Uses streaming I/O to avoid loading the entire file into memory.
 pub fn verify_file_integrity(path: &Path, expected_sha256: &str) -> Result<bool> {
     use sha2::{Digest, Sha256};
 
-    let data = std::fs::read(path)?;
+    let file = std::fs::File::open(path)?;
+    let mut reader = std::io::BufReader::with_capacity(64 * 1024, file);
     let mut hasher = Sha256::new();
-    hasher.update(&data);
+    std::io::copy(&mut reader, &mut hasher)?;
     let result = hasher.finalize();
     let actual: String = result.iter().map(|b| format!("{:02x}", b)).collect();
 

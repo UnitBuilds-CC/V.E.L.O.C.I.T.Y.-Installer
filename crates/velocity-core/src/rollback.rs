@@ -79,13 +79,19 @@ impl RollbackTracker {
     pub fn rollback(&mut self) -> Result<()> {
         logging::log("ROLLBACK: Starting rollback...");
 
+        let mut failures: Vec<String> = Vec::new();
+
         // Process in reverse order
         for op in self.operations.drain(..).rev() {
             match op {
                 RollbackOp::FileCreated(path) => {
                     if path.exists() {
                         logging::log_op("ROLLBACK", &format!("Removing file: {}", path.display()));
-                        let _ = std::fs::remove_file(&path);
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            let msg = format!("Failed to remove file {}: {}", path.display(), e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
                 RollbackOp::DirCreated(path) => {
@@ -94,7 +100,12 @@ impl RollbackTracker {
                             "ROLLBACK",
                             &format!("Removing directory: {}", path.display()),
                         );
-                        let _ = std::fs::remove_dir_all(&path);
+                        if let Err(e) = std::fs::remove_dir_all(&path) {
+                            let msg =
+                                format!("Failed to remove directory {}: {}", path.display(), e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
                 RollbackOp::RegistryWritten { root, path } => {
@@ -110,7 +121,11 @@ impl RollbackTracker {
                         "HKU" => winreg::RegKey::predef(winreg::enums::HKEY_USERS),
                         _ => continue,
                     };
-                    let _ = root_key.delete_subkey_all(&path);
+                    if let Err(e) = root_key.delete_subkey_all(&path) {
+                        let msg = format!("Failed to remove registry {}\\{}: {}", root, path, e);
+                        logging::log_error("ROLLBACK", &msg);
+                        failures.push(msg);
+                    }
                 }
                 RollbackOp::ShortcutCreated(path) => {
                     if path.exists() {
@@ -118,7 +133,12 @@ impl RollbackTracker {
                             "ROLLBACK",
                             &format!("Removing shortcut: {}", path.display()),
                         );
-                        let _ = std::fs::remove_file(&path);
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            let msg =
+                                format!("Failed to remove shortcut {}: {}", path.display(), e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
                 RollbackOp::EnvVarSet { name, scope } => {
@@ -142,19 +162,52 @@ impl RollbackTracker {
                             .ok(),
                     };
                     if let Some(key) = root_key {
-                        let _ = key.delete_value(&name);
+                        if let Err(e) = key.delete_value(&name) {
+                            let msg =
+                                format!("Failed to remove env var {} ({}): {}", name, scope, e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
                     }
                 }
                 RollbackOp::ServiceInstalled(name) => {
                     logging::log_op("ROLLBACK", &format!("Removing service: {}", name));
+                    // Stop the service first, then delete it
                     let _ = std::process::Command::new("sc")
-                        .args(["delete", &name])
+                        .args(["stop", &name])
                         .output();
+                    match std::process::Command::new("sc")
+                        .args(["delete", &name])
+                        .output()
+                    {
+                        Ok(output) if output.status.success() => {}
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            let msg = format!("Failed to remove service {}: {}", name, stderr);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
+                        Err(e) => {
+                            let msg = format!("Failed to run sc delete for {}: {}", name, e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
+                    }
                 }
             }
         }
 
-        logging::log("ROLLBACK: Rollback complete.");
+        if failures.is_empty() {
+            logging::log("ROLLBACK: Rollback complete.");
+        } else {
+            logging::log_warning(&format!(
+                "ROLLBACK: Rollback completed with {} failure(s):",
+                failures.len()
+            ));
+            for f in &failures {
+                logging::log_warning(&format!("  - {}", f));
+            }
+        }
         Ok(())
     }
 
