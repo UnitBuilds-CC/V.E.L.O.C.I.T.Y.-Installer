@@ -487,6 +487,63 @@ pub fn load_delta_package(path: &Path) -> Result<DeltaPackage> {
     Ok(delta)
 }
 
+/// Apply multiple delta packages in sequence (multi-hop update).
+///
+/// This allows updating across multiple versions in a single operation.
+/// For example: v1.0.0 → v1.0.1 → v1.0.2 → v1.0.3
+///
+/// # Arguments
+/// * `deltas` - List of delta packages to apply in order
+/// * `target_dir` - Directory to update
+///
+/// # Returns
+/// Result indicating success or failure
+pub fn apply_delta_chain(deltas: &[DeltaPackage], target_dir: &Path) -> Result<()> {
+    if deltas.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "Applying delta chain: {} -> {} ({} hops)",
+        deltas[0].from_version,
+        deltas[deltas.len() - 1].to_version,
+        deltas.len()
+    );
+
+    // Verify chain continuity
+    for i in 0..deltas.len() - 1 {
+        if deltas[i].to_version != deltas[i + 1].from_version {
+            return Err(CoreError::Other(format!(
+                "Delta chain broken: {} ends at {} but {} starts at {}",
+                i,
+                deltas[i].to_version,
+                i + 1,
+                deltas[i + 1].from_version
+            )));
+        }
+    }
+
+    // Apply each delta in sequence
+    for (i, delta) in deltas.iter().enumerate() {
+        info!(
+            "Applying delta {}/{}: {} -> {}",
+            i + 1,
+            deltas.len(),
+            delta.from_version,
+            delta.to_version
+        );
+        apply_delta(delta, target_dir)?;
+    }
+
+    info!(
+        "Delta chain applied successfully: {} -> {}",
+        deltas[0].from_version,
+        deltas[deltas.len() - 1].to_version
+    );
+
+    Ok(())
+}
+
 /// Rollback to backup directory on failure.
 fn rollback(target_dir: &Path, backup_dir: &Path) -> Result<()> {
     warn!("Rolling back to backup...");
@@ -791,5 +848,72 @@ mod tests {
         assert_eq!(loaded.from_version, "1.0.0");
         assert_eq!(loaded.to_version, "1.0.1");
         assert_eq!(loaded.patches.len(), delta.patches.len());
+    }
+
+    #[test]
+    fn test_delta_chain_multi_hop() {
+        let temp = TempDir::new().unwrap();
+        let v1_dir = temp.path().join("v1");
+        let v2_dir = temp.path().join("v2");
+        let v3_dir = temp.path().join("v3");
+        let target_dir = temp.path().join("target");
+
+        fs::create_dir_all(&v1_dir).unwrap();
+        fs::create_dir_all(&v2_dir).unwrap();
+        fs::create_dir_all(&v3_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        // Create v1 files
+        fs::write(v1_dir.join("file.txt"), "version 1").unwrap();
+        fs::write(v1_dir.join("unchanged.txt"), "same").unwrap();
+
+        // Create v2 files (modified file.txt)
+        fs::write(v2_dir.join("file.txt"), "version 2").unwrap();
+        fs::write(v2_dir.join("unchanged.txt"), "same").unwrap();
+
+        // Create v3 files (modified file.txt again, added new.txt)
+        fs::write(v3_dir.join("file.txt"), "version 3").unwrap();
+        fs::write(v3_dir.join("unchanged.txt"), "same").unwrap();
+        fs::write(v3_dir.join("new.txt"), "new in v3").unwrap();
+
+        // Copy v1 to target
+        copy_dir_recursive(&v1_dir, &target_dir).unwrap();
+
+        // Generate delta v1 -> v2
+        let delta1 = generate_delta(
+            &v1_dir,
+            &v2_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Generate delta v2 -> v3
+        let delta2 = generate_delta(
+            &v2_dir,
+            &v3_dir,
+            "1.0.1",
+            "1.0.2",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Apply delta chain
+        apply_delta_chain(&[delta1, delta2], &target_dir).unwrap();
+
+        // Verify target matches v3
+        assert_eq!(
+            fs::read_to_string(target_dir.join("file.txt")).unwrap(),
+            "version 3"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("unchanged.txt")).unwrap(),
+            "same"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("new.txt")).unwrap(),
+            "new in v3"
+        );
     }
 }
