@@ -529,3 +529,110 @@ pub fn remove_shortcuts(
         macos_impl::remove_shortcuts(config, app_name, start_menu_folder)
     }
 }
+
+/// Generate a filename-safe slug from an application name.
+///
+/// Converts to lowercase, replaces spaces with hyphens.
+/// Used across all platforms for shortcut file naming.
+pub fn app_slug(app_name: &str) -> String {
+    app_name.to_lowercase().replace(' ', "-")
+}
+
+/// Generate the content for a freedesktop.org `.desktop` file.
+///
+/// This is the Linux shortcut format. The content follows the
+/// [Desktop Entry Specification](https://specifications.freedesktop.org/desktop-entry-spec/latest/).
+#[cfg(not(target_os = "windows"))]
+pub fn desktop_entry_content(
+    name: &str,
+    exe: &std::path::Path,
+    workdir: &std::path::Path,
+    icon: Option<&std::path::Path>,
+) -> String {
+    let icon_line = icon
+        .map(|i| format!("Icon={}", i.display()))
+        .unwrap_or_default();
+    format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name={}\n\
+         Exec={} %U\n\
+         Path={}\n\
+         {}\n\
+         Terminal=false\n\
+         Categories=Utility;\n\
+         Comment=Installed by Velocity\n",
+        name,
+        exe.display(),
+        workdir.display(),
+        icon_line,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_slug_simple() {
+        assert_eq!(app_slug("MyApp"), "myapp");
+    }
+
+    #[test]
+    fn test_app_slug_with_spaces() {
+        assert_eq!(app_slug("My Cool App"), "my-cool-app");
+    }
+
+    #[test]
+    fn test_app_slug_already_lowercase() {
+        assert_eq!(app_slug("velocity"), "velocity");
+    }
+
+    #[test]
+    fn test_app_slug_multiple_spaces() {
+        assert_eq!(app_slug("A  B  C"), "a--b--c");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_desktop_entry_content_basic() {
+        let content = desktop_entry_content(
+            "Test App",
+            std::path::Path::new("/opt/test/test-app"),
+            std::path::Path::new("/opt/test"),
+            None,
+        );
+        assert!(content.contains("[Desktop Entry]"));
+        assert!(content.contains("Type=Application"));
+        assert!(content.contains("Name=Test App"));
+        assert!(content.contains("Exec=/opt/test/test-app %U"));
+        assert!(content.contains("Path=/opt/test"));
+        assert!(content.contains("Terminal=false"));
+        assert!(content.contains("Categories=Utility;"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_desktop_entry_content_with_icon() {
+        let content = desktop_entry_content(
+            "Icon App",
+            std::path::Path::new("/usr/bin/icon-app"),
+            std::path::Path::new("/usr/share/icon-app"),
+            Some(std::path::Path::new("/usr/share/icons/icon-app.png")),
+        );
+        assert!(content.contains("Icon=/usr/share/icons/icon-app.png"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_desktop_entry_content_no_icon() {
+        let content = desktop_entry_content(
+            "No Icon",
+            std::path::Path::new("/usr/bin/noicon"),
+            std::path::Path::new("/usr/share/noicon"),
+            None,
+        );
+        // Icon line should be empty (no "Icon=" line with a value)
+        assert!(!content.contains("Icon=/"));
+    }
+}

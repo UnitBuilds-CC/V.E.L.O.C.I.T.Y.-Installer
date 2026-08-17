@@ -528,3 +528,82 @@ pub fn remove_env_vars(entries: &[EnvVarEntry]) -> crate::error::Result<()> {
         macos_impl::remove_env_vars(entries)
     }
 }
+
+/// Validate an environment variable name.
+///
+/// Rejects empty names, names containing `=` or null bytes,
+/// and names starting with a digit.
+pub fn validate_env_var_name(name: &str) -> std::result::Result<(), String> {
+    if name.is_empty() {
+        return Err("Environment variable name cannot be empty".into());
+    }
+    if name.contains('=') {
+        return Err(format!(
+            "Environment variable name '{}' contains invalid character '='",
+            name
+        ));
+    }
+    if name.contains('\0') {
+        return Err(format!(
+            "Environment variable name '{}' contains invalid null byte",
+            name
+        ));
+    }
+    if name.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(format!(
+            "Environment variable name '{}' cannot start with a digit",
+            name
+        ));
+    }
+    Ok(())
+}
+
+/// Format an environment variable as a `KEY=VALUE` line.
+///
+/// Used for writing to `/etc/environment`, `~/.profile`, and `launchd.conf`.
+pub fn format_env_line(name: &str, value: &str) -> String {
+    format!("{}={}", name, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_env_var_name_valid() {
+        assert!(validate_env_var_name("PATH").is_ok());
+        assert!(validate_env_var_name("MY_VAR").is_ok());
+        assert!(validate_env_var_name("my_var_123").is_ok());
+        assert!(validate_env_var_name("_PRIVATE").is_ok());
+    }
+
+    #[test]
+    fn test_validate_env_var_name_empty() {
+        assert!(validate_env_var_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_env_var_name_equals() {
+        assert!(validate_env_var_name("FOO=BAR").is_err());
+    }
+
+    #[test]
+    fn test_validate_env_var_name_null_byte() {
+        assert!(validate_env_var_name("FOO\0BAR").is_err());
+    }
+
+    #[test]
+    fn test_validate_env_var_name_starts_with_digit() {
+        assert!(validate_env_var_name("1INVALID").is_err());
+        assert!(validate_env_var_name("9VAR").is_err());
+    }
+
+    #[test]
+    fn test_format_env_line() {
+        assert_eq!(format_env_line("PATH", "/usr/bin"), "PATH=/usr/bin");
+        assert_eq!(
+            format_env_line("MY_VAR", "hello world"),
+            "MY_VAR=hello world"
+        );
+    }
+}

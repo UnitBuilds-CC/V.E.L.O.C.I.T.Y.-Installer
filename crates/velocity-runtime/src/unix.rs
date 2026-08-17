@@ -178,12 +178,17 @@ pub fn run() -> Result<()> {
 /// service installation, environment variable setup, file associations,
 /// uninstaller generation, and post-install scripts. Reports progress
 /// via the `progress` callback as `fn(percentage, status_message)`.
+///
+/// Extraction reports per-file progress (5%–50%), and post-install steps
+/// are tracked in the rollback tracker so they can be undone on failure.
 pub fn run_install_with_progress(
     manifest: &VelocityManifest,
     install_dir: &std::path::Path,
     payload_data: &[u8],
     progress: fn(u32, String),
 ) -> Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     // Create install directory
     progress(0, "Creating install directory...".into());
     if let Err(e) = std::fs::create_dir_all(install_dir) {
@@ -194,54 +199,103 @@ pub fn run_install_with_progress(
     let mut rollback = RollbackTracker::new();
     rollback.track_dir(install_dir.to_path_buf());
 
-    // Extract files
+    // Extract files with per-file progress reporting
     progress(5, "Extracting files...".into());
-    match extract::extract_from_bytes(payload_data, install_dir, Some(&mut rollback)) {
-        Ok(stats) => {
-            info!(
-                "Extracted {} files ({} bytes) to {}",
-                stats.files_extracted,
-                stats.total_bytes,
-                install_dir.display()
-            );
+    let extracted_count = AtomicUsize::new(0);
+    let progress_cb: extract::ProgressCallback = Box::new({
+        move |_current, _total, name| {
+            let n = extracted_count.fetch_add(1, Ordering::Relaxed);
+            // Map extraction to 5%–50% range
+            let pct = 5 + (n as u32 + 1).min(45);
+            let display_name = if name.len() > 40 {
+                format!("...{}", &name[name.len() - 37..])
+            } else {
+                name.to_string()
+            };
+            progress(pct, display_name);
         }
-        Err(e) => {
-            error!("Extraction failed: {}", e);
-            let _ = rollback.rollback();
-            return Err(anyhow::anyhow!("Extraction failed: {}", e));
-        }
-    }
-    progress(50, "Files extracted".into());
+    });
 
-    // Create shortcuts
+    let extracted_files =
+        match extract::extract_archive(payload_data, install_dir, Some(&progress_cb)) {
+            Ok(files) => {
+                // Track each extracted file for rollback
+                for f in &files {
+                    rollback.track_file(f.clone());
+                }
+                info!(
+                    "Extracted {} files to {}",
+                    files.len(),
+                    install_dir.display()
+                );
+                files
+            }
+            Err(e) => {
+                error!("Extraction failed: {}", e);
+                let _ = rollback.rollback();
+                return Err(anyhow::anyhow!("Extraction failed: {}", e));
+            }
+        };
+    progress(50, format!("Extracted {} files", extracted_files.len()));
+
+    // Create shortcuts (tracked for rollback)
     if manifest.shortcuts.desktop || manifest.shortcuts.start_menu {
         progress(55, "Creating shortcuts...".into());
         let exe_name = manifest.app.name.replace(' ', "-").to_lowercase();
         let target_exe = install_dir.join(&exe_name);
-        if let Err(e) = shortcuts::create_shortcuts(
+        match shortcuts::create_shortcuts(
             &manifest.shortcuts,
             &manifest.app.name,
             &target_exe,
             install_dir,
             manifest.install.start_menu.as_deref(),
         ) {
-            warn!("Failed to create shortcuts: {}", e);
+            Ok(_) => {
+                // Track shortcut files for rollback
+                if manifest.shortcuts.desktop {
+                    let desktop_name = format!(
+                        "{}.desktop",
+                        manifest.app.name.replace(' ', "-").to_lowercase()
+                    );
+                    rollback.track_shortcut(install_dir.join(&desktop_name));
+                }
+                info!("Shortcuts created");
+            }
+            Err(e) => {
+                warn!("Failed to create shortcuts: {}", e);
+            }
         }
     }
 
-    // Install services
+    // Install services (tracked for rollback)
     if !manifest.services.is_empty() {
         progress(65, "Installing services...".into());
-        if let Err(e) = services::install_services(&manifest.services, install_dir) {
-            warn!("Failed to install services: {}", e);
+        match services::install_services(&manifest.services, install_dir) {
+            Ok(_) => {
+                for svc in &manifest.services {
+                    rollback.track_service(&svc.name);
+                }
+                info!("Services installed: {}", manifest.services.len());
+            }
+            Err(e) => {
+                warn!("Failed to install services: {}", e);
+            }
         }
     }
 
-    // Apply environment variables
+    // Apply environment variables (tracked for rollback)
     if !manifest.env_vars.is_empty() {
         progress(75, "Setting environment variables...".into());
-        if let Err(e) = env_vars::apply_env_vars(&manifest.env_vars) {
-            warn!("Failed to set environment variables: {}", e);
+        match env_vars::apply_env_vars(&manifest.env_vars) {
+            Ok(_) => {
+                for ev in &manifest.env_vars {
+                    rollback.track_env_var(&ev.name, &ev.scope);
+                }
+                info!("Environment variables set: {}", manifest.env_vars.len());
+            }
+            Err(e) => {
+                warn!("Failed to set environment variables: {}", e);
+            }
         }
     }
 
@@ -270,7 +324,7 @@ pub fn run_install_with_progress(
             &uninstaller_path,
         ) {
             Ok(_) => {
-                rollback.track_file(uninstaller_path);
+                rollback.track_file(uninstaller_path.clone());
                 info!("Uninstaller generated: {}", uninstaller_path.display());
             }
             Err(e) => {
@@ -282,9 +336,14 @@ pub fn run_install_with_progress(
     // Run post-install scripts
     if !manifest.scripts.post_install.is_empty() {
         progress(90, "Running post-install scripts...".into());
-        for cmd in &manifest.scripts.post_install {
+        for (i, cmd) in manifest.scripts.post_install.iter().enumerate() {
             info!("Running post-install script: {}", cmd);
             let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
+            let pct = 90 + ((i + 1) * 8 / manifest.scripts.post_install.len().max(1)) as u32;
+            progress(
+                pct.min(98),
+                format!("Script {}/{}", i + 1, manifest.scripts.post_install.len()),
+            );
         }
     }
 
