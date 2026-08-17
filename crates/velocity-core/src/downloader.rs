@@ -1,14 +1,14 @@
 //! HTTP file downloader with progress tracking and integrity verification.
 //!
-//! Uses WinHTTP for HTTP/HTTPS downloads, supporting:
+//! Platform backends:
+//! - Windows: WinHTTP API (no external dependencies)
+//! - Linux/macOS: `ureq` (synchronous HTTP/HTTPS via TLS)
+//!
+//! Features:
 //! - Progress callbacks for UI updates
 //! - SHA256 hash verification
+//! - Resumable downloads (HTTP Range)
 //! - Timeout handling
-//!
-//! Windows-only: uses WinHTTP API. Cross-platform HTTP will be provided
-//! via the platform module.
-
-#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use sha2::{Digest, Sha256};
@@ -47,8 +47,8 @@ pub fn download_file(
     std::fs::create_dir_all(output_dir)?;
     let output_path = output_dir.join(&fname);
 
-    // Download using WinHTTP
-    let data = download_with_winhttp(url, None, progress)?;
+    // Download using platform backend
+    let data = download_backend(url, None, progress)?;
 
     // Verify SHA256 if provided
     if let Some(expected) = expected_sha256 {
@@ -84,7 +84,7 @@ pub fn download_file(
 /// such as version-info JSON for the self-update mechanism.
 pub fn download_to_memory(url: &str) -> Result<Vec<u8>> {
     info!("Downloading to memory: {}", url);
-    let data = download_with_winhttp(url, None, None)?;
+    let data = download_backend(url, None, None)?;
     info!("Downloaded {} bytes (in memory)", data.len());
     Ok(data)
 }
@@ -128,7 +128,7 @@ pub fn download_file_resumable(
 
     // Download data, attempting resume if we have a partial file
     let (new_data, resumed) = if existing_bytes > 0 {
-        match download_with_winhttp_resume(url, existing_bytes, progress) {
+        match download_backend_resume(url, existing_bytes, progress) {
             Ok((data, true)) => {
                 // Server supported the range request — append to partial
                 (data, true)
@@ -143,12 +143,12 @@ pub fn download_file_resumable(
                 // Resume failed — clean up partial and retry from scratch
                 warn!("Resume failed ({}), restarting download", e);
                 let _ = std::fs::remove_file(&partial_path);
-                let data = download_with_winhttp(url, None, progress)?;
+                let data = download_backend(url, None, progress)?;
                 (data, false)
             }
         }
     } else {
-        let data = download_with_winhttp(url, None, progress)?;
+        let data = download_backend(url, None, progress)?;
         (data, false)
     };
 
@@ -194,9 +194,187 @@ pub fn download_file_resumable(
     Ok(output_path)
 }
 
+// ============================================================================
+// Platform backend dispatch
+// ============================================================================
+
+/// Download data from a URL using the platform-specific backend.
+#[cfg(target_os = "windows")]
+fn download_backend(
+    url: &str,
+    resume_from: Option<u64>,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<Vec<u8>> {
+    download_with_winhttp(url, resume_from, progress)
+}
+
+/// Download data from a URL using the platform-specific backend (Unix).
+#[cfg(not(target_os = "windows"))]
+fn download_backend(
+    url: &str,
+    resume_from: Option<u64>,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<Vec<u8>> {
+    download_with_ureq(url, resume_from, progress)
+}
+
+/// Download with resume support using the platform-specific backend.
+#[cfg(target_os = "windows")]
+fn download_backend_resume(
+    url: &str,
+    resume_from: u64,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<(Vec<u8>, bool)> {
+    download_with_winhttp_resume(url, resume_from, progress)
+}
+
+/// Download with resume support using the platform-specific backend (Unix).
+#[cfg(not(target_os = "windows"))]
+fn download_backend_resume(
+    url: &str,
+    resume_from: u64,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<(Vec<u8>, bool)> {
+    download_with_ureq_resume(url, resume_from, progress)
+}
+
+// ============================================================================
+// Unix HTTP backend (ureq)
+// ============================================================================
+
+/// Download data from a URL using ureq (Unix/Linux/macOS).
+#[cfg(not(target_os = "windows"))]
+fn download_with_ureq(
+    url: &str,
+    resume_from: Option<u64>,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<Vec<u8>> {
+    use std::io::Read;
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_read(std::time::Duration::from_secs(300))
+        .timeout_write(std::time::Duration::from_secs(30))
+        .build();
+
+    let mut req = agent.get(url);
+
+    // Add Range header for resume support
+    if let Some(offset) = resume_from {
+        req = req.set("Range", &format!("bytes={}-", offset));
+        debug!("Resuming download from byte {}", offset);
+    }
+
+    let response = req.call().map_err(|e| {
+        CoreError::other("HTTP request", format!("Failed to download {}: {}", url, e))
+    })?;
+
+    // Get content length if available
+    let content_len = response
+        .header("Content-Length")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let mut reader = response.into_reader();
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let n = reader.read(&mut buffer).map_err(|e| {
+            CoreError::other(
+                "HTTP read",
+                format!("Read error downloading {}: {}", url, e),
+            )
+        })?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..n]);
+
+        if let Some(cb) = progress {
+            let total = if resume_from.is_some() {
+                resume_from.unwrap() + data.len() as u64
+            } else {
+                data.len() as u64
+            };
+            cb(total, content_len, url);
+        }
+    }
+
+    if data.is_empty() {
+        warn!("Downloaded 0 bytes from {}", url);
+    }
+
+    Ok(data)
+}
+
+/// Download with resume support using ureq (Unix).
+/// Returns (data, did_resume). If the server doesn't support range requests,
+/// returns the full content with `did_resume = false`.
+#[cfg(not(target_os = "windows"))]
+fn download_with_ureq_resume(
+    url: &str,
+    resume_from: u64,
+    progress: Option<&DownloadProgressCallback>,
+) -> Result<(Vec<u8>, bool)> {
+    use std::io::Read;
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_read(std::time::Duration::from_secs(300))
+        .timeout_write(std::time::Duration::from_secs(30))
+        .build();
+
+    let response = agent
+        .get(url)
+        .set("Range", &format!("bytes={}-", resume_from))
+        .call()
+        .map_err(|e| {
+            CoreError::other("HTTP request", format!("Failed to download {}: {}", url, e))
+        })?;
+
+    // Check if server returned 206 Partial Content (range supported)
+    let range_supported = response.status() == 206;
+    let content_len = response
+        .header("Content-Length")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let mut reader = response.into_reader();
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let n = reader.read(&mut buffer).map_err(|e| {
+            CoreError::other(
+                "HTTP read",
+                format!("Read error downloading {}: {}", url, e),
+            )
+        })?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..n]);
+
+        if let Some(cb) = progress {
+            let total = if range_supported {
+                resume_from + data.len() as u64
+            } else {
+                data.len() as u64
+            };
+            cb(total, content_len, url);
+        }
+    }
+
+    Ok((data, range_supported))
+}
+
+// ============================================================================
+// Windows HTTP backend (WinHTTP)
+// ============================================================================
+
 /// Download data from a URL using WinHTTP, with resume support.
 /// Returns (data, did_resume). If the server doesn't support range requests,
 /// returns the full content with `did_resume = false`.
+#[cfg(target_os = "windows")]
 fn download_with_winhttp_resume(
     url: &str,
     resume_from: u64,
@@ -355,6 +533,7 @@ fn download_with_winhttp_resume(
 
 /// Download data from a URL using WinHTTP.
 /// If `resume_from` is Some(n), sends a Range header to resume from byte n.
+#[cfg(target_os = "windows")]
 fn download_with_winhttp(
     url: &str,
     resume_from: Option<u64>,

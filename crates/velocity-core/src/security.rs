@@ -34,6 +34,14 @@ pub fn create_secure_temp_dir(app_name: &str) -> Result<PathBuf> {
         restrict_directory_acl(&temp_path)?;
     }
 
+    // On Unix, set permissions to 0700 (owner read/write/execute only)
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o700);
+        std::fs::set_permissions(&temp_path, permissions)?;
+    }
+
     info!("Created secure temp dir: {}", temp_path.display());
     debug!("Session ID: {}", session_id);
     Ok(temp_path)

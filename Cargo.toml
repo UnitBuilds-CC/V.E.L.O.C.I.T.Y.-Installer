@@ -52,6 +52,7 @@ winreg = "0.52"
 # Cross-platform
 getrandom = "0.2"
 dirs = "5"
+ureq = "2"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

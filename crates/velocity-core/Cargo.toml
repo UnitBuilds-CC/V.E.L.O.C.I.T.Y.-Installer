@@ -30,3 +30,7 @@ dirs = { workspace = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
 winreg = { workspace = true }
+
+# Unix HTTP support
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+ureq = { workspace = true }

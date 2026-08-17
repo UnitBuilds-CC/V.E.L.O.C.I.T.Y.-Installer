@@ -79,46 +79,62 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
     for cmd in &info.pre_uninstall {
         logging::log_op("SCRIPT", cmd);
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
+        if let Err(e) = std::process::Command::new("cmd").args(["/C", cmd]).output() {
+            tracing::warn!("Pre-uninstall script failed: {}", e);
+        }
         #[cfg(not(target_os = "windows"))]
-        let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
+        if let Err(e) = std::process::Command::new("sh").args(["-c", cmd]).output() {
+            tracing::warn!("Pre-uninstall script failed: {}", e);
+        }
     }
 
     // Cross-platform cleanup: services, env vars, file associations, shortcuts
     // Stop and remove services
     if !info.services.is_empty() {
         logging::log_op("UNINSTALL", "Removing services...");
-        let _ = crate::services::remove_services(&info.services);
+        if let Err(e) = crate::services::remove_services(&info.services) {
+            tracing::warn!("Failed to remove services: {}", e);
+        }
     }
 
     // Remove environment variables
     if !info.env_vars.is_empty() {
         logging::log_op("UNINSTALL", "Removing environment variables...");
-        let _ = crate::env_vars::remove_env_vars(&info.env_vars);
+        if let Err(e) = crate::env_vars::remove_env_vars(&info.env_vars) {
+            tracing::warn!("Failed to remove environment variables: {}", e);
+        }
     }
 
     // Remove file associations
     if !info.file_associations.is_empty() {
         logging::log_op("UNINSTALL", "Removing file associations...");
-        let _ = file_assoc::remove_file_associations(&info.file_associations);
+        if let Err(e) = file_assoc::remove_file_associations(&info.file_associations) {
+            tracing::warn!("Failed to remove file associations: {}", e);
+        }
     }
 
     // Remove shortcuts
     logging::log_op("UNINSTALL", "Removing shortcuts...");
-    let _ = shortcuts::remove_shortcuts(
+    if let Err(e) = shortcuts::remove_shortcuts(
         &info.shortcut_config,
         &info.app_name,
         info.start_menu_folder.as_deref(),
-    );
+    ) {
+        tracing::warn!("Failed to remove shortcuts: {}", e);
+    }
 
     // Windows-specific: remove registry entries and uninstall entry
     #[cfg(target_os = "windows")]
     {
         if !info.registry_entries.is_empty() {
             logging::log_op("UNINSTALL", "Removing registry entries...");
-            let _ = registry::remove_registry_entries(&info.registry_entries);
+            if let Err(e) = registry::remove_registry_entries(&info.registry_entries) {
+                tracing::warn!("Failed to remove registry entries: {}", e);
+            }
         }
-        let _ = registry::remove_uninstall_entry(&info.app_name);
+        if let Err(e) = registry::remove_uninstall_entry(&info.app_name) {
+            tracing::warn!("Failed to remove uninstall entry: {}", e);
+        }
     }
 
     // Remove installed files
@@ -182,9 +198,13 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
     for cmd in &info.post_uninstall {
         logging::log_op("SCRIPT", cmd);
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
+        if let Err(e) = std::process::Command::new("cmd").args(["/C", cmd]).output() {
+            tracing::warn!("Post-uninstall script failed: {}", e);
+        }
         #[cfg(not(target_os = "windows"))]
-        let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
+        if let Err(e) = std::process::Command::new("sh").args(["-c", cmd]).output() {
+            tracing::warn!("Post-uninstall script failed: {}", e);
+        }
     }
 
     logging::log_success(&format!("Uninstallation complete: {}", info.app_name));
