@@ -39,6 +39,17 @@ fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<
         &svc.display_name,
     ]);
 
+    // Add service account if specified
+    if let Some(ref account) = svc.account {
+        cmd.args(["obj=", account]);
+    }
+
+    // Add dependencies if specified
+    if !svc.dependencies.is_empty() {
+        let deps = svc.dependencies.join("/");
+        cmd.args(["depend=", &deps]);
+    }
+
     let output = cmd.output()
         .map_err(|e| CoreError::Other(format!("Failed to run sc create: {}", e)))?;
 

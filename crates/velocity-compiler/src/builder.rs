@@ -207,12 +207,3 @@ fn build_runtime(project_dir: &Path) -> Result<()> {
 
     Ok(())
 }
-
-/// Create a self-extracting installer that doesn't need the runtime pre-built.
-///
-/// This is an alternative build mode that creates a minimal stub executable
-/// with the payload embedded, using a hardcoded entry point.
-pub fn build_standalone(options: &BuildOptions) -> Result<BuildResult> {
-    // For now, delegate to the regular build
-    build_installer(options)
-}

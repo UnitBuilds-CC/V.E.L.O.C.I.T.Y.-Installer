@@ -38,12 +38,9 @@ impl RuntimeArgs {
         for arg in args.iter().skip(1) {
             match arg.as_str() {
                 "/S" | "/s" | "--silent" | "-s" | "/quiet" | "-q" => silent = true,
-                "/D=path" | "/d=path" => {
-                    dir = Some(arg[5..].to_string());
-                }
                 "--force" | "-f" => force = true,
                 _ => {
-                    // Check for /D= prefix (Inno Setup compatible)
+                    // Check for /D= prefix (Inno Setup compatible directory override)
                     if arg.starts_with("/D=") || arg.starts_with("/d=") {
                         dir = Some(arg[3..].to_string());
                     }
@@ -161,8 +158,21 @@ fn main() -> Result<()> {
         if velocity_core::process_detect::is_app_running(main_exe).unwrap_or(false) {
             warn!("Application {} is currently running", main_exe);
             logging::log_warning(&format!("Application {} is currently running", main_exe));
-            
-            if !args.silent {
+                
+            if manifest.install.close_app_before_install {
+                // Automatically close the application
+                info!("Closing application as configured...");
+                logging::log_op("CLOSE", &format!("Closing {}", main_exe));
+                let process_name = std::path::Path::new(main_exe)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(main_exe);
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/IM", process_name, "/F"])
+                    .output();
+                // Wait for process to exit
+                let _ = velocity_core::process_detect::wait_for_process_exit(process_name, 10);
+            } else if !args.silent {
                 let proceed = velocity_ui::classic::show_confirm(
                     "Application Running",
                     &format!(
@@ -173,7 +183,7 @@ fn main() -> Result<()> {
                     ),
                 );
                 if !proceed {
-                    info!("Installation cancelled — app is running");
+                    info!("Installation cancelled - app is running");
                     return Ok(());
                 }
             }
@@ -205,6 +215,30 @@ fn main() -> Result<()> {
 
     // Initialize install logger in the target directory
     let _final_log = logging::move_log_to_install_dir(install_dir, &manifest.app.name).ok();
+
+    // Step 6.5: Run pre-install scripts
+    for cmd in &manifest.scripts.pre_install {
+        info!("Running pre-install: {}", cmd);
+        logging::log_op("SCRIPT", cmd);
+        let output = std::process::Command::new("cmd")
+            .args(["/C", cmd])
+            .current_dir(install_dir)
+            .output();
+        match output {
+            Ok(out) if !out.status.success() => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                warn!("Pre-install script failed: {}", stderr);
+                logging::log_error("SCRIPT", &format!("{}: {}", cmd, stderr));
+            }
+            Err(e) => {
+                warn!("Pre-install script error: {}", e);
+                logging::log_error("SCRIPT", &format!("{}: {}", cmd, e));
+            }
+            _ => {
+                logging::log_success(&format!("Pre-install: {}", cmd));
+            }
+        }
+    }
 
     // Step 7: Extract files with rollback tracking
     info!("Extracting files...");
@@ -351,10 +385,27 @@ fn main() -> Result<()> {
     info!("Generating uninstaller...");
     let runtime_exe = std::fs::read(&exe_path)?;
     let uninstaller_path = install_dir.join("uninstall.exe");
-    match velocity_core::uninstaller::generate_uninstaller(
+    
+    // Build uninstall info and populate files_to_remove with extracted files
+    let mut uninstall_info = velocity_core::uninstaller::UninstallInfo {
+        app_name: manifest.app.name.clone(),
+        install_dir: install_dir.to_string_lossy().to_string(),
+        files_to_remove: Vec::new(),
+        registry_entries: manifest.registry.clone(),
+        shortcut_config: manifest.shortcuts.clone(),
+        start_menu_folder: manifest.install.start_menu.clone(),
+        env_vars: manifest.env_vars.clone(),
+        services: manifest.services.clone(),
+        file_associations: manifest.file_associations.clone(),
+        pre_uninstall: manifest.scripts.pre_uninstall.clone(),
+        post_uninstall: manifest.scripts.post_uninstall.clone(),
+    };
+    velocity_core::uninstaller::populate_files_to_remove(&mut uninstall_info, &extracted);
+    
+    // Generate the uninstaller executable with embedded info
+    match velocity_core::uninstaller::generate_uninstaller_with_info(
         &runtime_exe,
-        &manifest,
-        install_dir,
+        &uninstall_info,
         &uninstaller_path,
     ) {
         Ok(()) => {
@@ -379,6 +430,8 @@ fn main() -> Result<()> {
             &manifest.app.publisher,
             icon_str.as_deref(),
             manifest.uninstall.display_name.as_deref(),
+            manifest.uninstall.help_url.as_deref(),
+            manifest.uninstall.update_url.as_deref(),
         ) {
             Ok(()) => {
                 logging::log_success("Registered in Add/Remove Programs");
@@ -394,10 +447,24 @@ fn main() -> Result<()> {
     for cmd in &manifest.scripts.post_install {
         info!("Running post-install: {}", cmd);
         logging::log_op("SCRIPT", cmd);
-        let _ = std::process::Command::new("cmd")
+        let output = std::process::Command::new("cmd")
             .args(["/C", cmd])
             .current_dir(install_dir)
             .output();
+        match output {
+            Ok(out) if !out.status.success() => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                warn!("Post-install script failed: {}", stderr);
+                logging::log_error("SCRIPT", &format!("{}: {}", cmd, stderr));
+            }
+            Err(e) => {
+                warn!("Post-install script error: {}", e);
+                logging::log_error("SCRIPT", &format!("{}: {}", cmd, e));
+            }
+            _ => {
+                logging::log_success(&format!("Post-install: {}", cmd));
+            }
+        }
     }
 
     // Installation successful — clear rollback tracker
@@ -405,16 +472,18 @@ fn main() -> Result<()> {
     logging::log_success("Installation completed successfully!");
 
     // Step 17: Show completion
-    if !args.silent {
+    let should_launch = if !args.silent {
         velocity_ui::classic::show_finish_dialog(
             &manifest.app.name,
             install_dir,
             manifest.install.run_after_install.as_deref(),
-        );
-    }
+        )
+    } else {
+        wizard_result.launch_after
+    };
 
     // Step 18: Launch application if requested
-    if wizard_result.launch_after {
+    if should_launch {
         if let Some(exe) = &manifest.install.run_after_install {
             let exe_path = install_dir.join(exe);
             if exe_path.exists() {

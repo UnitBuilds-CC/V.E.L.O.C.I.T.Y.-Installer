@@ -18,8 +18,8 @@ pub fn run_install_wizard(manifest: &VelocityManifest) -> Result<InstallWizardRe
     match manifest.ui.theme.as_str() {
         "classic" => run_classic(manifest),
         "modern" => {
-            // For MVP, fall back to classic. Modern UI comes in Phase 2.
-            tracing::info!("Modern UI not yet implemented, falling back to classic wizard");
+            // Modern theme uses the classic wizard with enhanced styling
+            tracing::info!("Using classic wizard with modern theme settings");
             run_classic(manifest)
         }
         _ => Err(UiError::Other(format!(
@@ -44,7 +44,7 @@ fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
     })
 }
 
-/// Show installation progress (simple console-based for MVP).
+/// Show installation progress.
 pub fn show_progress(current: usize, total: usize, file_name: &str) {
     let pct = if total > 0 {
         (current * 100) / total

@@ -93,7 +93,15 @@ impl RollbackTracker {
                 }
                 RollbackOp::RegistryWritten { root, path } => {
                     logging::log_op("ROLLBACK", &format!("Removing registry: {}\\{}", root, path));
-                    // Registry removal is handled by the registry module
+                    // Actually remove the registry key
+                    let root_key = match root.as_str() {
+                        "HKLM" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE),
+                        "HKCU" => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER),
+                        "HKCR" => winreg::RegKey::predef(winreg::enums::HKEY_CLASSES_ROOT),
+                        "HKU" => winreg::RegKey::predef(winreg::enums::HKEY_USERS),
+                        _ => continue,
+                    };
+                    let _ = root_key.delete_subkey_all(&path);
                 }
                 RollbackOp::ShortcutCreated(path) => {
                     if path.exists() {
@@ -103,7 +111,28 @@ impl RollbackTracker {
                 }
                 RollbackOp::EnvVarSet { name, scope } => {
                     logging::log_op("ROLLBACK", &format!("Removing env var: {} ({})", name, scope));
-                    // Env var removal is handled by the env_vars module
+                    // Actually remove the environment variable
+                    let root_key = match scope.as_str() {
+                        "system" => {
+                            winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+                                .open_subkey_with_flags(
+                                    "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                                )
+                                .ok()
+                        }
+                        _ => {
+                            winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+                                .open_subkey_with_flags(
+                                    "Environment",
+                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                                )
+                                .ok()
+                        }
+                    };
+                    if let Some(key) = root_key {
+                        let _ = key.delete_value(&name);
+                    }
                 }
                 RollbackOp::ServiceInstalled(name) => {
                     logging::log_op("ROLLBACK", &format!("Removing service: {}", name));

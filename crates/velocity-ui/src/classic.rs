@@ -222,31 +222,61 @@ fn show_directory_dialog(app_name: &str, default_dir: &str) -> Result<String> {
 }
 
 /// Show installation progress dialog.
+///
+/// Returns a ProgressHandle that can be used to update the progress.
+/// The progress is shown via console output with a formatted progress bar.
 pub fn show_install_progress(app_name: &str) -> ProgressHandle {
-    // For the MVP, progress is shown via console output
-    // Phase 2 will add a proper Win32 progress dialog
+    println!();
+    println!("  {} Setup — Installing...", app_name);
+    println!("  {}", "─".repeat(50));
     ProgressHandle {
         app_name: app_name.to_string(),
+        last_percent: 0,
     }
 }
 
 /// Handle for updating installation progress.
 pub struct ProgressHandle {
     app_name: String,
+    last_percent: u32,
 }
 
 impl ProgressHandle {
     /// Update the progress (0-100).
-    pub fn set_progress(&self, percent: u32, file_name: &str) {
-        print!("\r[{:3}%] {} - {}", percent, self.app_name, file_name);
-        if percent >= 100 {
-            println!();
+    pub fn set_progress(&mut self, percent: u32, file_name: &str) {
+        // Only update display every 5% to avoid console spam
+        if percent >= self.last_percent + 5 || percent >= 100 {
+            self.last_percent = percent;
+            let filled = (percent as usize) / 2;
+            let empty = 50 - filled;
+            let bar: String = std::iter::repeat('█').take(filled)
+                .chain(std::iter::repeat('░').take(empty))
+                .collect();
+            
+            // Truncate filename if too long
+            let display_name = if file_name.len() > 30 {
+                format!("...{}", &file_name[file_name.len()-27..])
+            } else {
+                file_name.to_string()
+            };
+            
+            print!("\r  [{}] {:3}%  {}", bar, percent, display_name);
+            if percent >= 100 {
+                println!();
+                println!("  {}", "─".repeat(50));
+            }
         }
     }
 
     /// Mark installation as complete.
-    pub fn complete(&self) {
-        println!("{} installation complete!", self.app_name);
+    pub fn complete(&mut self) {
+        self.last_percent = 100;
+        println!("  {} installation complete!", self.app_name);
+    }
+
+    /// Close the progress display (no-op for console).
+    pub fn close(&self) {
+        // Console progress doesn't need explicit close
     }
 }
 
@@ -303,28 +333,50 @@ pub fn show_confirm(title: &str, message: &str) -> bool {
 }
 
 /// Show the Finish dialog with option to launch the app.
-pub fn show_finish_dialog(app_name: &str, install_dir: &Path, _run_after: Option<&str>) -> bool {
+///
+/// Returns `true` if the user wants to launch the app after closing.
+pub fn show_finish_dialog(app_name: &str, install_dir: &Path, run_after: Option<&str>) -> bool {
     use windows::core::*;
     use windows::Win32::UI::WindowsAndMessaging::*;
 
-    let message = format!(
+    let mut message = format!(
         "{} has been successfully installed!\r\n\r\n\
-         Installation directory:\r\n{}\r\n\r\n\
-         Click OK to finish the setup.",
+         Installation directory:\r\n{}",
         app_name,
         install_dir.display()
     );
 
+    if let Some(exe) = run_after {
+        message.push_str(&format!(
+            "\r\n\r\nWould you like to launch {} now?",
+            exe
+        ));
+    }
+
+    message.push_str("\r\n\r\nClick OK to finish the setup.");
+
     unsafe {
         let title_w: Vec<u16> = format!("{} Setup Complete", app_name).encode_utf16().chain(std::iter::once(0)).collect();
         let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-        MessageBoxW(
-            None,
-            PCWSTR(msg_w.as_ptr()),
-            PCWSTR(title_w.as_ptr()),
-            MB_OK | MB_ICONINFORMATION,
-        );
+        
+        // If there's a run_after exe, show Yes/No/Cancel (Yes = launch + close)
+        // Otherwise just OK
+        if run_after.is_some() {
+            let result = MessageBoxW(
+                None,
+                PCWSTR(msg_w.as_ptr()),
+                PCWSTR(title_w.as_ptr()),
+                MB_YESNO | MB_ICONINFORMATION,
+            );
+            result == IDYES
+        } else {
+            MessageBoxW(
+                None,
+                PCWSTR(msg_w.as_ptr()),
+                PCWSTR(title_w.as_ptr()),
+                MB_OK | MB_ICONINFORMATION,
+            );
+            false // No run_after, don't launch
+        }
     }
-
-    true // User clicked OK
 }

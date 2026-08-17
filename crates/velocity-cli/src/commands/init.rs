@@ -73,12 +73,10 @@ fn create_project(project_dir: &Path, name: &str) -> Result<()> {
     let assets_dir = project_dir.join("assets");
     std::fs::create_dir_all(&assets_dir)?;
 
-    // Create a placeholder icon note
-    let readme_path = assets_dir.join("README.txt");
-    std::fs::write(
-        &readme_path,
-        "Place your application icon here as icon.ico (256x256 recommended).\n",
-    )?;
+    // Generate a default 16x16 icon
+    let icon_path = assets_dir.join("icon.ico");
+    let icon_data = generate_default_icon();
+    std::fs::write(&icon_path, &icon_data)?;
 
     // Create output directory
     let output_dir = project_dir.join("output");
@@ -170,4 +168,84 @@ fn to_title_case(input: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Generate a minimal valid 16x16 32-bit ICO file with a blue gradient.
+fn generate_default_icon() -> Vec<u8> {
+    let width: u32 = 16;
+    let height: u32 = 16;
+    let bpp: u16 = 32;
+
+    // BMP info header (BITMAPINFOHEADER)
+    let header_size = 40u32;
+    let pixel_data_size = width * height * 4; // 1024 bytes
+    let image_data_size = header_size + pixel_data_size; // 1064 bytes
+
+    // ICO file structure:
+    // ICONDIR (6 bytes) + ICONDIRENTRY (16 bytes) + image data
+    let mut ico = Vec::with_capacity(6 + 16 + image_data_size as usize);
+
+    // ICONDIR
+    ico.extend_from_slice(&0u16.to_le_bytes()); // Reserved
+    ico.extend_from_slice(&1u16.to_le_bytes()); // Type: icon
+    ico.extend_from_slice(&1u16.to_le_bytes()); // Count: 1 image
+
+    // ICONDIRENTRY
+    ico.push(width as u8);   // Width (16)
+    ico.push(height as u8);  // Height (16)
+    ico.push(0);             // Color count (0 = >= 256)
+    ico.push(0);             // Reserved
+    ico.extend_from_slice(&1u16.to_le_bytes()); // Color planes
+    ico.extend_from_slice(&bpp.to_le_bytes());  // Bits per pixel
+    ico.extend_from_slice(&image_data_size.to_le_bytes()); // Size of image data
+    ico.extend_from_slice(&(6u32 + 16u32).to_le_bytes()); // Offset to image data
+
+    // BITMAPINFOHEADER
+    ico.extend_from_slice(&header_size.to_le_bytes()); // biSize
+    ico.extend_from_slice(&width.to_le_bytes());       // biWidth
+    ico.extend_from_slice(&(height * 2).to_le_bytes()); // biHeight (2x for ICO)
+    ico.extend_from_slice(&1u16.to_le_bytes());        // biPlanes
+    ico.extend_from_slice(&bpp.to_le_bytes());         // biBitCount
+    ico.extend_from_slice(&0u32.to_le_bytes());        // biCompression (BI_RGB)
+    ico.extend_from_slice(&pixel_data_size.to_le_bytes()); // biSizeImage
+    ico.extend_from_slice(&0u32.to_le_bytes());        // biXPelsPerMeter
+    ico.extend_from_slice(&0u32.to_le_bytes());        // biYPelsPerMeter
+    ico.extend_from_slice(&0u32.to_le_bytes());        // biClrUsed
+    ico.extend_from_slice(&0u32.to_le_bytes());        // biClrImportant
+
+    // Pixel data (BGRA, bottom-up)
+    // Create a blue gradient with a "V" shape for Velocity
+    for y in 0..height {
+        for x in 0..width {
+            let fy = y as f32 / (height - 1) as f32;
+            let fx = x as f32 / (width - 1) as f32;
+
+            // Blue gradient background (#0078D4 -> #005A9E)
+            let r = (0.0 + fy * 0.0) as u8;
+            let g = (0x78 - (fy * 30.0) as u8).max(0x40);
+            let b = (0xD4 - (fy * 20.0) as u8).max(0x80);
+
+            // Draw a white "V" shape
+            let in_v = {
+                let cx = width as f32 / 2.0;
+                let left_line = (fx * height as f32) < (cx - 1.0) * (1.0 - fy) + 2.0;
+                let right_line = ((width as f32 - 1.0 - fx) * height as f32) < (cx - 1.0) * (1.0 - fy) + 2.0;
+                let center_check = fy > 0.2 && fy < 0.9;
+                center_check && (left_line || right_line)
+            };
+
+            let (br, bg, bb, ba) = if in_v {
+                (255, 255, 255, 255) // White V
+            } else {
+                (r, g, b, 255) // Blue background
+            };
+
+            ico.push(bb); // B
+            ico.push(bg); // G
+            ico.push(br); // R
+            ico.push(ba); // A
+        }
+    }
+
+    ico
 }
