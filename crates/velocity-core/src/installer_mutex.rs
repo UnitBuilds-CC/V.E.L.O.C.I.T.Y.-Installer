@@ -37,6 +37,9 @@ impl InstallerMutex {
 
         info!("Attempting to acquire installer mutex: {}", mutex_name);
 
+        // SAFETY: Win32 mutex API — CreateMutexW returns a handle closed by CloseHandle.
+        // On ERROR_ALREADY_EXISTS we close the handle and return an error.
+        // On other errors we store a null handle (Drop checks for null before release).
         unsafe {
             let name_w: Vec<u16> = mutex_name
                 .encode_utf16()
@@ -87,6 +90,8 @@ impl InstallerMutex {
             .collect::<String>();
         let mutex_name = format!("Global\\VelocityInstaller_{}", safe_name);
 
+        // SAFETY: OpenMutexW returns a handle that is always closed with CloseHandle.
+        // The mutex name is sanitized to alphanumeric + underscore only.
         unsafe {
             let name_w: Vec<u16> = mutex_name
                 .encode_utf16()
@@ -94,7 +99,6 @@ impl InstallerMutex {
                 .collect();
 
             // Try to open the existing mutex
-            // SYNCHRONIZATION access right
             let result = OpenMutexW(
                 windows::Win32::System::Threading::SYNCHRONIZATION_ACCESS_RIGHTS(0x00100000u32),
                 false, PCWSTR(name_w.as_ptr()),
@@ -118,6 +122,8 @@ impl InstallerMutex {
 impl Drop for InstallerMutex {
     fn drop(&mut self) {
         if !self.handle.0.is_null() {
+            // SAFETY: handle was created by CreateMutexW and is valid (non-null).
+            // ReleaseMutex + CloseHandle are called exactly once via Drop.
             unsafe {
                 let _ = ReleaseMutex(self.handle);
                 let _ = CloseHandle(self.handle);

@@ -190,6 +190,9 @@ fn download_with_winhttp_resume(
     use windows::core::*;
     use windows::Win32::Networking::WinHttp::*;
 
+    // SAFETY: WinHTTP session lifecycle — handles are closed in reverse order
+    // (request → connection → session) on all paths including errors.
+    // PCWSTR pointers derive from stack-allocated Vec<u16> that outlive the calls.
     unsafe {
         let agent: Vec<u16> = "Velocity Installer\0".encode_utf16().collect();
         let session = WinHttpOpen(
@@ -326,6 +329,8 @@ fn download_with_winhttp(
     use windows::core::*;
     use windows::Win32::Networking::WinHttp::*;
 
+    // SAFETY: WinHTTP session lifecycle — handles closed in reverse order on all paths.
+    // PCWSTR pointers from stack-allocated Vec<u16> that outlive the calls.
     unsafe {
         // Open WinHTTP session — use default proxy
         let agent: Vec<u16> = "Velocity Installer\0".encode_utf16().collect();

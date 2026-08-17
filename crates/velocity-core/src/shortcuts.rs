@@ -103,6 +103,8 @@ pub fn create_lnk(
     struct ComGuard;
     impl ComGuard {
         fn new() -> Self {
+            // SAFETY: CoInitialize must be called before any COM operation on this thread.
+            // Paired with CoUninitialize in Drop.
             unsafe {
                 let _ = CoInitialize(None).ok();
             }
@@ -110,6 +112,7 @@ pub fn create_lnk(
         }
     }
     impl Drop for ComGuard {
+        // SAFETY: CoUninitialize balances the CoInitialize from new().
         fn drop(&mut self) {
             unsafe { CoUninitialize(); }
         }
@@ -117,6 +120,9 @@ pub fn create_lnk(
 
     let _com_guard = ComGuard::new();
 
+    // SAFETY: COM IShellLinkW/IPersistFile are smart pointers managing refcount.
+    // All PCWSTR pointers derive from Vec<u16> buffers that outlive the COM calls.
+    // CoInitialize was called by ComGuard above.
     unsafe {
         let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
             .map_err(|e| CoreError::com("create IShellLink", format!("{}", e)))?;
@@ -237,6 +243,8 @@ fn get_known_folder_path(folder: KnownFolder) -> Result<PathBuf> {
         KnownFolder::Programs => &FOLDERID_Programs,
     };
 
+    // SAFETY: SHGetKnownFolderPath allocates via COM allocator; freed by CoTaskMemFree
+    // after copying into a Rust PathBuf. Manual pointer walk determines UTF-16 length.
     unsafe {
         let path_ptr = SHGetKnownFolderPath(folder_id, KNOWN_FOLDER_FLAG(0), None)
             .map_err(|e| CoreError::com("SHGetKnownFolderPath", format!("{}", e)))?;

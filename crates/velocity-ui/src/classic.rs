@@ -1,5 +1,14 @@
 //! Classic Win32 wizard UI for the installer.
 //!
+//! # Safety
+//!
+//! This module contains 9 `unsafe` blocks, all following the same pattern:
+//! UTF-16 encode a Rust `String` into a `Vec<u16>` with null termination,
+//! then pass `PCWSTR` pointers to `MessageBoxW`. The safety invariant is:
+//! - `Vec<u16>` owns its buffer; `.as_ptr()` is valid for the Vec's lifetime
+//! - `.chain(std::iter::once(0))` guarantees null-termination for `PCWSTR`
+//! - `MessageBoxW` is synchronous — the Vec outlives the call
+//!
 //! Implements a full multi-page wizard:
 //! - Welcome page
 //! - License agreement page

@@ -256,6 +256,11 @@ fn run_wizard_window(
     sidebar_image_path: Option<String>,
     strings: WizardStrings,
 ) -> Result<NativeWizardResult> {
+    // SAFETY: Win32 window creation and message loop. INITCOMMONCONTROLSEX.cbSize is
+    // set correctly. WizardData is heap-allocated via Box::into_raw and stored in
+    // GWLP_USERDATA; reclaimed via Box::from_raw in WM_DESTROY. All child HWNDs are
+    // stored in WizardData and become invalid when the window is destroyed (correct).
+    // Message loop runs on the creating thread (single-threaded apartment).
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,

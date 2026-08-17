@@ -161,6 +161,9 @@ fn detect_wow64() -> bool {
     // For 32-bit processes, use IsWow64Process via Windows API
     #[cfg(target_os = "windows")]
     {
+        // SAFETY: GetProcAddress returns a valid function pointer for IsWow64Process
+        // from kernel32.dll (always loaded). The transmute target signature matches
+        // the actual API exactly. GetCurrentProcess returns a pseudo-handle (no close needed).
         unsafe {
             use windows::Win32::System::Threading::GetCurrentProcess;
             use windows::Win32::System::LibraryLoader::GetModuleHandleW;

@@ -10,6 +10,9 @@ pub fn is_admin() -> bool {
     use windows::Win32::Foundation::*;
     use windows::Win32::Security::*;
 
+    // SAFETY: Win32 SID API — AllocateAndInitializeSid allocates a SID that is
+    // freed by FreeSid on all paths. CheckTokenMembership borrows (not takes) the SID.
+    // PSID::default() initializes to null, preventing double-free if allocation fails.
     unsafe {
         let mut admin_sid: PSID = PSID::default();
         let admin_group = SID_IDENTIFIER_AUTHORITY {
@@ -108,6 +111,9 @@ fn shell_execute_elevated(exe_path: &Path, args: &[String]) -> Result<bool> {
         ..Default::default()
     };
 
+    // SAFETY: ShellExecuteExW with SEE_MASK_NOCLOSEPROCESS — sei struct is properly
+    // initialized with cbSize. Wide-string pointers outlive the call. Process handle
+    // is closed with CloseHandle on success.
     unsafe {
         match ShellExecuteExW(&mut sei) {
             Ok(()) => {

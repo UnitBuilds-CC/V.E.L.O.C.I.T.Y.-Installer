@@ -125,6 +125,9 @@ fn broadcast_env_change() {
     use windows::Win32::Foundation::*;
     use windows::Win32::UI::WindowsAndMessaging::*;
 
+    // SAFETY: SendMessageTimeoutW with HWND_BROADCAST and a static null-terminated
+    // string. SMTO_ABORTIFHUNG with 5s timeout prevents hanging. Synchronous call —
+    // the Vec<u16> buffer outlives the call.
     unsafe {
         let env_str: Vec<u16> = "Environment\0".encode_utf16().collect();
         let result = SendMessageTimeoutW(

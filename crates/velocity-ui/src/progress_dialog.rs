@@ -1,5 +1,11 @@
 //! Native Win32 progress dialog for installation.
 //!
+//! # Safety
+//!
+//! This module contains 2 `unsafe` blocks using `MessageBoxW` with the same
+//! UTF-16 encode + null-terminate pattern as `classic.rs`. The `Vec<u16>`
+//! buffers outlive the synchronous `MessageBoxW` calls.
+//!
 //! Creates a real window with:
 //! - Progress bar (PBS_SMOOTH)
 //! - Current file label
