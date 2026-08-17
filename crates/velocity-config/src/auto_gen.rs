@@ -238,6 +238,8 @@ pub fn collect_files(
         } else {
             search_base.join(pattern).to_string_lossy().to_string()
         };
+        // Normalize path separators for the glob crate (requires forward slashes)
+        let full_pattern = full_pattern.replace('\\', "/");
 
         let paths = glob::glob(&full_pattern).map_err(ConfigError::GlobError)?;
 

@@ -33,7 +33,7 @@ reboot_handling = "auto"
 
 # --- Files ---
 [files]
-source = ["./files/**"]
+source = ["files/bin/*", "files/docs/*", "files/sdk/*", "files/samples/*"]
 exclude = ["*.pdb", "*.tmp", "*.log"]
 
 # --- Components (user-selectable) ---
