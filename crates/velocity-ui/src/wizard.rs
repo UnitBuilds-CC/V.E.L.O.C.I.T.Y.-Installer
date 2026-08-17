@@ -82,23 +82,6 @@ fn run_native_with_payload(
     })
 }
 
-/// Run the native Win32 wizard and map to InstallWizardResult.
-fn run_native(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    let result = native_wizard::run_native_wizard(manifest, None)?;
-
-    if result.cancelled {
-        return Err(UiError::Cancelled);
-    }
-
-    Ok(InstallWizardResult {
-        install_dir: result.install_dir,
-        cancelled: false,
-        launch_after: result.launch_after,
-        selected_components: result.selected_components,
-        install_completed: false,
-    })
-}
-
 /// Progress tracker with ETA calculation.
 ///
 /// Tracks installation progress and provides estimated time remaining
