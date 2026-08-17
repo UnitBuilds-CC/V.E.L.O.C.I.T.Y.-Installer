@@ -17,17 +17,49 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_exe() -> PathBuf {
-    workspace_root()
-        .join("target")
-        .join("release")
-        .join("velocity-runtime.exe")
+    let name = if cfg!(target_os = "windows") {
+        "velocity-runtime.exe"
+    } else {
+        "velocity-runtime"
+    };
+    workspace_root().join("target").join("release").join(name)
 }
 
 fn velocity_cli() -> PathBuf {
-    workspace_root()
-        .join("target")
-        .join("release")
-        .join("velocity.exe")
+    let name = if cfg!(target_os = "windows") {
+        "velocity.exe"
+    } else {
+        "velocity"
+    };
+    workspace_root().join("target").join("release").join(name)
+}
+
+/// Return the platform-appropriate installer output filename.
+fn installer_filename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "installer.exe"
+    } else {
+        "installer"
+    }
+}
+
+/// Return the platform-appropriate uninstaller filename.
+fn uninstaller_filename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "uninstall.exe"
+    } else {
+        "uninstall"
+    }
+}
+
+/// Return the silent install + directory args for the platform.
+fn installer_run_args(install_dir: &Path, password: Option<&str>) -> Vec<String> {
+    let mut args = vec!["/S".to_string()];
+    if let Some(pw) = password {
+        args.push(format!("/P={}", pw));
+    }
+    args.push(format!("/D={}", install_dir.display()));
+    args
 }
 
 /// Create a minimal test project with velocity.toml and sample files.
@@ -101,7 +133,11 @@ fn test_build_and_run_installer() {
     // Copy runtime to where the compiler expects it
     let runtime_target = project_dir.join("target").join("release");
     std::fs::create_dir_all(&runtime_target).unwrap();
-    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+    std::fs::copy(
+        runtime_exe(),
+        runtime_target.join(runtime_exe().file_name().unwrap()),
+    )
+    .unwrap();
 
     // Step 2: Build the installer
     let output = Command::new(velocity_cli())
@@ -119,28 +155,50 @@ fn test_build_and_run_installer() {
         stderr
     );
 
-    // Step 3: Verify installer exe exists and is valid PE
-    let installer = project_dir.join("output").join("installer.exe");
-    assert!(installer.exists(), "Installer exe not created");
+    // Step 3: Verify installer exe exists and is valid
+    let installer = project_dir.join("output").join(installer_filename());
+    assert!(installer.exists(), "Installer not created");
 
     let exe_bytes = std::fs::read(&installer).unwrap();
-    assert!(
-        exe_bytes.len() > 1000,
-        "Installer exe is too small to be valid"
-    );
+    assert!(exe_bytes.len() > 1000, "Installer is too small to be valid");
 
-    // Check PE signature
-    let pe_offset =
-        i32::from_le_bytes([exe_bytes[60], exe_bytes[61], exe_bytes[62], exe_bytes[63]]) as usize;
-    assert_eq!(
-        &exe_bytes[pe_offset..pe_offset + 2],
-        b"PE",
-        "Invalid PE signature"
-    );
+    // Check PE signature on Windows
+    #[cfg(target_os = "windows")]
+    {
+        let pe_offset =
+            i32::from_le_bytes([exe_bytes[60], exe_bytes[61], exe_bytes[62], exe_bytes[63]])
+                as usize;
+        assert_eq!(
+            &exe_bytes[pe_offset..pe_offset + 2],
+            b"PE",
+            "Invalid PE signature"
+        );
+    }
+
+    // Check ELF signature on Linux
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(
+            &exe_bytes[..4],
+            &[0x7f, b'E', b'L', b'F'],
+            "Invalid ELF signature"
+        );
+    }
+
+    // Check Mach-O signature on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let magic = u32::from_be_bytes([exe_bytes[0], exe_bytes[1], exe_bytes[2], exe_bytes[3]]);
+        assert!(
+            magic == 0xFEEDFACE || magic == 0xFEEDFACF || magic == 0xCAFEBABE,
+            "Invalid Mach-O signature"
+        );
+    }
 
     // Step 4: Run installer in silent mode
+    let run_args = installer_run_args(&install_dir, None);
     let run_output = Command::new(&installer)
-        .args(["/S", &format!("/D={}", install_dir.display())])
+        .args(&run_args)
         .output()
         .expect("Failed to run installer");
 
@@ -168,7 +226,7 @@ fn test_build_and_run_installer() {
         "readme.txt not installed"
     );
     assert!(
-        install_dir.join("uninstall.exe").exists(),
+        install_dir.join(uninstaller_filename()).exists(),
         "Uninstaller not generated"
     );
 
@@ -268,7 +326,11 @@ theme = "classic"
 
     let runtime_target = project_dir.join("target").join("release");
     std::fs::create_dir_all(&runtime_target).unwrap();
-    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+    std::fs::copy(
+        runtime_exe(),
+        runtime_target.join(runtime_exe().file_name().unwrap()),
+    )
+    .unwrap();
 
     // Build
     let output = Command::new(velocity_cli())
@@ -279,13 +341,10 @@ theme = "classic"
     assert!(output.status.success(), "Encrypted build failed");
 
     // Run with password
-    let installer = project_dir.join("output").join("installer.exe");
+    let installer = project_dir.join("output").join(installer_filename());
+    let run_args = installer_run_args(&install_dir, Some("test-password-123"));
     let run_output = Command::new(&installer)
-        .args([
-            "/S",
-            "/P=test-password-123",
-            &format!("/D={}", install_dir.display()),
-        ])
+        .args(&run_args)
         .output()
         .expect("Failed to run encrypted installer");
 
@@ -359,7 +418,11 @@ theme = "classic"
 
     let runtime_target = project_dir.join("target").join("release");
     std::fs::create_dir_all(&runtime_target).unwrap();
-    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+    std::fs::copy(
+        runtime_exe(),
+        runtime_target.join(runtime_exe().file_name().unwrap()),
+    )
+    .unwrap();
 
     // Build
     let output = Command::new(velocity_cli())
@@ -369,14 +432,15 @@ theme = "classic"
         .expect("Failed to run velocity build");
     assert!(output.status.success(), "Stress build failed");
 
-    let installer = project_dir.join("output").join("installer.exe");
+    let installer = project_dir.join("output").join(installer_filename());
     assert!(installer.exists());
     let installer_size = std::fs::metadata(&installer).unwrap().len();
     println!("Stress installer size: {} MB", installer_size / 1024 / 1024);
 
     // Run installer
+    let run_args = installer_run_args(&install_dir, None);
     let run_output = Command::new(&installer)
-        .args(["/S", &format!("/D={}", install_dir.display())])
+        .args(&run_args)
         .output()
         .expect("Failed to run stress installer");
     assert!(run_output.status.success(), "Stress installer failed");
@@ -457,7 +521,11 @@ theme = "classic"
 
     let runtime_target = project_dir.join("target").join("release");
     std::fs::create_dir_all(&runtime_target).unwrap();
-    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+    std::fs::copy(
+        runtime_exe(),
+        runtime_target.join(runtime_exe().file_name().unwrap()),
+    )
+    .unwrap();
 
     // Build
     let output = Command::new(velocity_cli())
@@ -467,7 +535,7 @@ theme = "classic"
         .expect("Failed to run velocity build");
     assert!(output.status.success(), "Large file build failed");
 
-    let installer = project_dir.join("output").join("installer.exe");
+    let installer = project_dir.join("output").join(installer_filename());
     let installer_size = std::fs::metadata(&installer).unwrap().len();
     println!(
         "Large file installer size: {} MB (from 50MB uncompressed)",
@@ -476,7 +544,7 @@ theme = "classic"
 
     // Run installer
     let run_output = Command::new(&installer)
-        .args(["/S", &format!("/D={}", install_dir.display())])
+        .args(&installer_run_args(&install_dir, None))
         .output()
         .expect("Failed to run large file installer");
     assert!(run_output.status.success(), "Large file installer failed");
@@ -563,7 +631,11 @@ theme = "classic"
 
     let runtime_target = project_dir.join("target").join("release");
     std::fs::create_dir_all(&runtime_target).unwrap();
-    std::fs::copy(runtime_exe(), runtime_target.join("velocity-runtime.exe")).unwrap();
+    std::fs::copy(
+        runtime_exe(),
+        runtime_target.join(runtime_exe().file_name().unwrap()),
+    )
+    .unwrap();
 
     // Build
     let output = Command::new(velocity_cli())
@@ -573,11 +645,11 @@ theme = "classic"
         .expect("Failed to run velocity build");
     assert!(output.status.success(), "Unicode build failed");
 
-    let installer = project_dir.join("output").join("installer.exe");
+    let installer = project_dir.join("output").join(installer_filename());
 
     // Run installer
     let run_output = Command::new(&installer)
-        .args(["/S", &format!("/D={}", install_dir.display())])
+        .args(&installer_run_args(&install_dir, None))
         .output()
         .expect("Failed to run Unicode installer");
     assert!(run_output.status.success(), "Unicode installer failed");

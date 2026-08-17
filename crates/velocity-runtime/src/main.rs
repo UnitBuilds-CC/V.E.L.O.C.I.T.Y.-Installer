@@ -201,6 +201,63 @@ fn is_safe_url_for_shell(url: &str) -> bool {
     !url.chars().any(|c| dangerous_chars.contains(&c))
 }
 
+/// Core Unix install path validation (pure function, testable on all platforms).
+///
+/// Rejects null bytes, empty paths, overly long paths, the filesystem root,
+/// and dangerous system directories on Linux and macOS.
+#[cfg(any(test, not(target_os = "windows")))]
+fn validate_unix_install_path(path_str: &str) -> std::result::Result<(), String> {
+    if path_str.contains('\0') {
+        return Err("Install path contains invalid null byte".to_string());
+    }
+    if path_str.is_empty() {
+        return Err("Install path is empty".to_string());
+    }
+    if path_str.len() > 4096 {
+        return Err(format!(
+            "Install path is too long ({} chars, max 4096)",
+            path_str.len()
+        ));
+    }
+    let normalized = path_str.trim_end_matches('/');
+    if normalized.is_empty() || normalized == "/" {
+        return Err("Cannot install to the filesystem root".to_string());
+    }
+    let dangerous = [
+        "/bin",
+        "/sbin",
+        "/usr",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/lib",
+        "/usr/share",
+        "/usr/include",
+        "/etc",
+        "/dev",
+        "/proc",
+        "/sys",
+        "/boot",
+        "/lib",
+        "/lib64",
+        "/var",
+        "/tmp",
+        "/home",
+        "/root",
+        "/private",
+        "/System",
+        "/Library",
+    ];
+    for d in &dangerous {
+        if normalized == *d {
+            return Err(format!(
+                "Cannot install to system directory '{}'. Please choose a different location.",
+                d
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +324,94 @@ mod tests {
         assert!(!is_safe_url_for_shell("https://example.com/path;rm"));
         assert!(!is_safe_url_for_shell("ftp://example.com/file")); // not http(s)
         assert!(!is_safe_url_for_shell("javascript:alert(1)"));
+    }
+
+    // -- Unix path validation tests (run on all platforms) --
+
+    #[test]
+    fn test_unix_valid_paths() {
+        assert!(validate_unix_install_path("/opt/my-app").is_ok());
+        assert!(validate_unix_install_path("/Applications/MyApp").is_ok());
+        assert!(validate_unix_install_path("/home/user/.local/share/myapp").is_ok());
+        assert!(validate_unix_install_path("/opt/my-app/lib/plugins/v2").is_ok());
+    }
+
+    #[test]
+    fn test_unix_trailing_slash_normalized() {
+        assert!(validate_unix_install_path("/opt/my-app/").is_ok());
+        assert!(validate_unix_install_path("/opt/my-app///").is_ok());
+    }
+
+    #[test]
+    fn test_unix_rejects_empty_and_null() {
+        assert!(validate_unix_install_path("").is_err());
+        assert!(validate_unix_install_path("/opt/my\0app").is_err());
+    }
+
+    #[test]
+    fn test_unix_rejects_too_long() {
+        let long = format!("/opt/{}", "a".repeat(4100));
+        assert!(validate_unix_install_path(&long)
+            .unwrap_err()
+            .contains("too long"));
+    }
+
+    #[test]
+    fn test_unix_accepts_max_length() {
+        // "/opt/" is 5 chars + 4091 = 4096 total
+        let path = format!("/opt/{}", "a".repeat(4091));
+        assert_eq!(path.len(), 4096);
+        assert!(validate_unix_install_path(&path).is_ok());
+    }
+
+    #[test]
+    fn test_unix_rejects_root() {
+        assert!(validate_unix_install_path("/").is_err());
+        assert!(validate_unix_install_path("//").is_err());
+    }
+
+    #[test]
+    fn test_unix_rejects_dangerous_dirs() {
+        for dir in &[
+            "/bin",
+            "/sbin",
+            "/usr",
+            "/usr/bin",
+            "/usr/sbin",
+            "/usr/lib",
+            "/usr/share",
+            "/etc",
+            "/dev",
+            "/proc",
+            "/sys",
+            "/boot",
+            "/lib",
+            "/lib64",
+            "/var",
+            "/tmp",
+            "/home",
+            "/root",
+            "/private",
+            "/System",
+            "/Library",
+        ] {
+            assert!(
+                validate_unix_install_path(dir).is_err(),
+                "Should reject {}",
+                dir
+            );
+        }
+    }
+
+    #[test]
+    fn test_unix_rejects_dangerous_with_trailing_slash() {
+        assert!(validate_unix_install_path("/etc/").is_err());
+        assert!(validate_unix_install_path("/bin/").is_err());
+    }
+
+    #[test]
+    fn test_unix_allows_subdirs_of_dangerous() {
+        assert!(validate_unix_install_path("/usr/local/myapp").is_ok());
+        assert!(validate_unix_install_path("/opt/custom/app").is_ok());
     }
 }

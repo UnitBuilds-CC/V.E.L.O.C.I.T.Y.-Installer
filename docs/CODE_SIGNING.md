@@ -130,3 +130,60 @@ searches these locations automatically:
 - New certificates need to build reputation — sign consistently over time
 - Consider upgrading to an EV certificate for immediate trust
 - Ensure timestamping was used during signing
+
+## CI/CD Signing (GitHub Actions)
+
+The CI pipeline signs release binaries automatically on tagged releases. Configure
+these GitHub repository secrets to enable signing on each platform:
+
+### Windows (Authenticode)
+
+| Secret | Description |
+|---|---|
+| `CODE_SIGNING_FINGERPRINT` | SHA1 fingerprint of the code signing certificate installed on the runner |
+
+If `CODE_SIGNING_FINGERPRINT` is not set, Windows signing is gracefully skipped.
+
+### macOS (codesign)
+
+| Secret | Description |
+|---|---|
+| `APPLE_CERTIFICATE_BASE64` | Base64-encoded `.p12` certificate file |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate |
+
+To export your certificate:
+```bash
+security export -t identity -f pkcs12 -o cert.p12 -P "password"
+base64 cert.p12 | pbcopy  # Copy to APPLE_CERTIFICATE_BASE64
+```
+
+If `APPLE_CERTIFICATE_PASSWORD` is not set, macOS signing is gracefully skipped.
+
+### Linux (GPG)
+
+| Secret | Description |
+|---|---|
+| `GPG_PRIVATE_KEY` | ASCII-armored GPG private key |
+| `GPG_PASSPHRASE` | Passphrase for the GPG key |
+
+To export your GPG key:
+```bash
+gpg --armor --export-secret-keys your-key-id > key.asc
+cat key.asc  # Copy contents to GPG_PRIVATE_KEY
+```
+
+If `GPG_PRIVATE_KEY` is not set, Linux signing is gracefully skipped.
+
+### Generating Signed Releases
+
+Tag a release and push — the CI pipeline handles the rest:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Signed artifacts are uploaded as GitHub Actions artifacts:
+- `velocity-signed-windows` — Authenticode-signed `.exe` files
+- `velocity-signed-macos` — codesigned binaries
+- `velocity-signed-linux` — GPG-signed binaries with `.asc` detached signatures

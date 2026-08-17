@@ -729,4 +729,241 @@ mod tests {
         let theme = detect_system_theme();
         assert!(theme == "light" || theme == "dark");
     }
+
+    #[test]
+    fn test_js_message_ready() {
+        let json = r#"{"type":"ready"}"#;
+        let msg: JsMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, JsMessage::Ready));
+    }
+
+    #[test]
+    fn test_js_message_next_back() {
+        let msg: JsMessage = serde_json::from_str(r#"{"type":"next"}"#).unwrap();
+        assert!(matches!(msg, JsMessage::Next));
+        let msg: JsMessage = serde_json::from_str(r#"{"type":"back"}"#).unwrap();
+        assert!(matches!(msg, JsMessage::Back));
+    }
+
+    #[test]
+    fn test_js_message_set_dir() {
+        let json = r#"{"type":"set_dir","data":"/opt/myapp"}"#;
+        let msg: JsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            JsMessage::SetDir(dir) => assert_eq!(dir, "/opt/myapp"),
+            _ => panic!("Expected SetDir"),
+        }
+    }
+
+    #[test]
+    fn test_js_message_toggle_component() {
+        let json = r#"{"type":"toggle_component","data":"core"}"#;
+        let msg: JsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            JsMessage::ToggleComponent(id) => assert_eq!(id, "core"),
+            _ => panic!("Expected ToggleComponent"),
+        }
+    }
+
+    #[test]
+    fn test_js_message_finish_with_launch() {
+        let json = r#"{"type":"finish","data":{"launch":true}}"#;
+        let msg: JsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            JsMessage::Finish { launch } => assert!(launch),
+            _ => panic!("Expected Finish"),
+        }
+    }
+
+    #[test]
+    fn test_js_message_finish_no_launch() {
+        let json = r#"{"type":"finish","data":{"launch":false}}"#;
+        let msg: JsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            JsMessage::Finish { launch } => assert!(!launch),
+            _ => panic!("Expected Finish"),
+        }
+    }
+
+    #[test]
+    fn test_js_message_invalid_json() {
+        let result: std::result::Result<JsMessage, _> = serde_json::from_str("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_js_message_unknown_type() {
+        let result: std::result::Result<JsMessage, _> =
+            serde_json::from_str(r#"{"type":"unknown_action"}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_handle_ipc_next_navigation() {
+        let state = Arc::new(Mutex::new(WizardState {
+            page: "welcome".to_string(),
+            app_name: "Test".into(),
+            app_version: "1.0".into(),
+            publisher: "Test".into(),
+            install_dir: "/opt/test".into(),
+            default_dir: "/opt/test".into(),
+            license_text: "".into(),
+            components: vec![],
+            selected_components: vec![],
+            theme: "light".into(),
+            progress_percent: 0,
+            progress_file: "".into(),
+            cancelled: false,
+            launch_after: false,
+        }));
+        let (browse_tx, _) = mpsc::channel();
+        let (install_req_tx, _) = mpsc::channel();
+
+        // Navigate forward
+        handle_ipc_message(&state, r#"{"type":"next"}"#, &browse_tx, &install_req_tx);
+        assert_eq!(state.lock().unwrap().page, "license");
+
+        handle_ipc_message(&state, r#"{"type":"next"}"#, &browse_tx, &install_req_tx);
+        assert_eq!(state.lock().unwrap().page, "directory");
+
+        // Navigate back
+        handle_ipc_message(&state, r#"{"type":"back"}"#, &browse_tx, &install_req_tx);
+        assert_eq!(state.lock().unwrap().page, "license");
+    }
+
+    #[test]
+    fn test_handle_ipc_toggle_component() {
+        let state = Arc::new(Mutex::new(WizardState {
+            page: "components".to_string(),
+            app_name: "Test".into(),
+            app_version: "1.0".into(),
+            publisher: "Test".into(),
+            install_dir: "/opt/test".into(),
+            default_dir: "/opt/test".into(),
+            license_text: "".into(),
+            components: vec![
+                ComponentItem {
+                    id: "core".into(),
+                    name: "Core".into(),
+                    description: "Core files".into(),
+                    size_mb: 10.0,
+                    selected: true,
+                    mandatory: true,
+                },
+                ComponentItem {
+                    id: "docs".into(),
+                    name: "Docs".into(),
+                    description: "Documentation".into(),
+                    size_mb: 5.0,
+                    selected: false,
+                    mandatory: false,
+                },
+            ],
+            selected_components: vec!["core".into()],
+            theme: "light".into(),
+            progress_percent: 0,
+            progress_file: "".into(),
+            cancelled: false,
+            launch_after: false,
+        }));
+        let (browse_tx, _) = mpsc::channel();
+        let (install_req_tx, _) = mpsc::channel();
+
+        // Toggle non-mandatory component
+        handle_ipc_message(
+            &state,
+            r#"{"type":"toggle_component","data":"docs"}"#,
+            &browse_tx,
+            &install_req_tx,
+        );
+        let st = state.lock().unwrap();
+        assert!(
+            st.components
+                .iter()
+                .find(|c| c.id == "docs")
+                .unwrap()
+                .selected
+        );
+        assert!(st.selected_components.contains(&"docs".to_string()));
+
+        // Cannot toggle mandatory component
+        handle_ipc_message(
+            &state,
+            r#"{"type":"toggle_component","data":"core"}"#,
+            &browse_tx,
+            &install_req_tx,
+        );
+        let st = state.lock().unwrap();
+        assert!(
+            st.components
+                .iter()
+                .find(|c| c.id == "core")
+                .unwrap()
+                .selected
+        );
+    }
+
+    #[test]
+    fn test_handle_ipc_cancel() {
+        let state = Arc::new(Mutex::new(WizardState {
+            page: "welcome".to_string(),
+            app_name: "Test".into(),
+            app_version: "1.0".into(),
+            publisher: "Test".into(),
+            install_dir: "/opt/test".into(),
+            default_dir: "/opt/test".into(),
+            license_text: "".into(),
+            components: vec![],
+            selected_components: vec![],
+            theme: "light".into(),
+            progress_percent: 0,
+            progress_file: "".into(),
+            cancelled: false,
+            launch_after: false,
+        }));
+        let (browse_tx, _) = mpsc::channel();
+        let (install_req_tx, _) = mpsc::channel();
+
+        handle_ipc_message(&state, r#"{"type":"cancel"}"#, &browse_tx, &install_req_tx);
+        assert!(state.lock().unwrap().cancelled);
+    }
+
+    #[test]
+    fn test_handle_ipc_set_dir() {
+        let state = Arc::new(Mutex::new(WizardState {
+            page: "directory".to_string(),
+            app_name: "Test".into(),
+            app_version: "1.0".into(),
+            publisher: "Test".into(),
+            install_dir: "/opt/test".into(),
+            default_dir: "/opt/test".into(),
+            license_text: "".into(),
+            components: vec![],
+            selected_components: vec![],
+            theme: "light".into(),
+            progress_percent: 0,
+            progress_file: "".into(),
+            cancelled: false,
+            launch_after: false,
+        }));
+        let (browse_tx, _) = mpsc::channel();
+        let (install_req_tx, _) = mpsc::channel();
+
+        handle_ipc_message(
+            &state,
+            r#"{"type":"set_dir","data":"/home/user/myapp"}"#,
+            &browse_tx,
+            &install_req_tx,
+        );
+        assert_eq!(state.lock().unwrap().install_dir, "/home/user/myapp");
+    }
+
+    #[test]
+    fn test_ipc_shim_preserves_non_script_content() {
+        let html = "<div>Hello</div><script>\nvar x = 1;\n</script><p>World</p>";
+        let result = inject_ipc_shim(html);
+        assert!(result.contains("<div>Hello</div>"));
+        assert!(result.contains("<p>World</p>"));
+        assert!(result.contains("window.ipc"));
+    }
 }

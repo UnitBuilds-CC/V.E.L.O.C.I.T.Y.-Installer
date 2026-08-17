@@ -19,12 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            label: Windows
-          - os: ubuntu-latest
-            label: Linux
-          - os: macos-latest
-            label: macOS
+          - os: windows-2025
+            label: Windows 2025
+          - os: windows-2022
+            label: Windows 2022
+          - os: ubuntu-24.04
+            label: Ubuntu 24.04
+          - os: ubuntu-22.04
+            label: Ubuntu 22.04
+          - os: macos-15
+            label: macOS 15
+          - os: macos-14
+            label: macOS 14
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,12 +60,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            label: Windows
-          - os: ubuntu-latest
-            label: Linux
-          - os: macos-latest
-            label: macOS
+          - os: windows-2025
+            label: Windows 2025
+          - os: windows-2022
+            label: Windows 2022
+          - os: ubuntu-24.04
+            label: Ubuntu 24.04
+          - os: ubuntu-22.04
+            label: Ubuntu 22.04
+          - os: macos-15
+            label: macOS 15
+          - os: macos-14
+            label: macOS 14
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -91,15 +103,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2025
             label: Windows
             cli_name: velocity.exe
             runtime_name: velocity-runtime.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             label: Linux
             cli_name: velocity
             runtime_name: velocity-runtime
-          - os: macos-latest
+          - os: macos-15
             label: macOS
             cli_name: velocity
             runtime_name: velocity-runtime
