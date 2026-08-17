@@ -5,3 +5,4 @@ pub mod detect;
 pub mod info;
 pub mod init;
 pub mod sign;
+pub mod update;

@@ -122,6 +122,13 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
+
+    /// Check for updates and install the latest version
+    Update {
+        /// Only check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -193,6 +200,13 @@ fn main() -> Result<()> {
             args,
         } => {
             commands::dep::run(&subcommand, &config, &args)?;
+        }
+        Commands::Update { check } => {
+            if check {
+                commands::update::run_check()?;
+            } else {
+                commands::update::run_update()?;
+            }
         }
     }
 

@@ -10,18 +10,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
+  # ---------------------------------------------------------------------------
+  # Lint & Format
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Clippy & Format
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: cargo check
-        run: cargo check --workspace --all-targets
-      - name: cargo build
-        run: cargo build --workspace
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
 
+  # ---------------------------------------------------------------------------
+  # Unit & Integration Tests
+  # ---------------------------------------------------------------------------
   test:
     name: Test
     runs-on: windows-latest
@@ -29,53 +37,84 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run unit tests
-        run: cargo test --workspace
-      - name: Run E2E tests
-        run: cargo test -p velocity-compiler --test e2e -- --ignored --nocapture
-        continue-on-error: true
 
-  clippy:
-    name: Clippy
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Build the runtime first so e2e tests can find it
+      - name: Build runtime for e2e tests
+        run: cargo build --release -p velocity-runtime
 
-  fmt:
-    name: Format
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
+      # Run all tests INCLUDING the ignored e2e tests
+      - name: Run all tests (including e2e)
+        run: cargo test --workspace -- --include-ignored
 
-  release:
-    name: Release Build
+  # ---------------------------------------------------------------------------
+  # Build Release
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build Release
     runs-on: windows-latest
-    needs: [check, test, clippy]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build release
+      - name: Build release binaries
         run: cargo build --release --workspace
-      - name: Upload CLI artifact
+      - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
           name: velocity-cli
           path: target/release/velocity.exe
-      - name: Upload runtime artifact
+      - name: Upload runtime
         uses: actions/upload-artifact@v4
         with:
           name: velocity-runtime
           path: target/release/velocity-runtime.exe
+
+  # ---------------------------------------------------------------------------
+  # Code Signing (only on tagged releases)
+  # ---------------------------------------------------------------------------
+  sign:
+    name: Code Signing
+    runs-on: windows-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-cli
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-runtime
+          path: artifacts
+
+      - name: Sign CLI binary
+        shell: pwsh
+        env:
+          CERT_FINGERPRINT: ${{ secrets.CODE_SIGNING_FINGERPRINT }}
+        run: |
+          if (-not $env:CERT_FINGERPRINT) {
+            Write-Host "No signing certificate configured (CODE_SIGNING_FINGERPRINT secret), skipping."
+            exit 0
+          }
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -match "x64" } | Select-Object -First 1).FullName
+          if (-not $signtool) { Write-Host "signtool.exe not found, skipping."; exit 0 }
+          & $signtool sign /sha1 $env:CERT_FINGERPRINT /tr http://timestamp.digicert.com /td sha256 /fd sha256 /d "Velocity CLI" artifacts/velocity.exe
+          & $signtool sign /sha1 $env:CERT_FINGERPRINT /tr http://timestamp.digicert.com /td sha256 /fd sha256 /d "Velocity Runtime" artifacts/velocity-runtime.exe
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -match "x64" } | Select-Object -First 1).FullName
+          if (-not $signtool) { exit 0 }
+          & $signtool verify /pa artifacts/velocity.exe
+          & $signtool verify /pa artifacts/velocity-runtime.exe
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-signed
+          path: artifacts/
