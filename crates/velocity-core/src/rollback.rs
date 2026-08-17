@@ -194,4 +194,32 @@ mod tests {
         tracker.clear();
         assert_eq!(tracker.count(), 0);
     }
+
+    #[test]
+    fn test_rollback_removes_files_and_dirs() {
+        let temp = std::env::temp_dir().join("velocity_test_rollback");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        // Create a file and directory to track
+        let file_path = temp.join("tracked_file.txt");
+        std::fs::write(&file_path, "test").unwrap();
+        let dir_path = temp.join("tracked_dir");
+        std::fs::create_dir_all(&dir_path).unwrap();
+        std::fs::write(dir_path.join("inner.txt"), "inner").unwrap();
+
+        let mut tracker = RollbackTracker::new();
+        tracker.track_file(file_path.clone());
+        tracker.track_dir(dir_path.clone());
+        assert_eq!(tracker.count(), 2);
+
+        // Rollback should remove both
+        tracker.rollback().unwrap();
+
+        assert!(!file_path.exists(), "File should be removed by rollback");
+        assert!(!dir_path.exists(), "Dir should be removed by rollback");
+        assert_eq!(tracker.count(), 0, "Operations should be drained");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }

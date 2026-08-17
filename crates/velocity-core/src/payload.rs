@@ -60,14 +60,30 @@ pub fn read_payload(exe_path: &Path) -> Result<(Vec<u8>, Vec<u8>)> {
     // Read manifest length + manifest
     let mut len_buf = [0u8; 8];
     file.read_exact(&mut len_buf)?;
-    let manifest_len = u64::from_le_bytes(len_buf) as usize;
+    let manifest_len = u64::from_le_bytes(len_buf);
+
+    // Sanity check: reject manifests larger than 100MB
+    if manifest_len > 100 * 1024 * 1024 {
+        return Err(CoreError::InvalidPayload(format!(
+            "Manifest length {} exceeds maximum allowed size (100MB)", manifest_len
+        )));
+    }
+    let manifest_len = manifest_len as usize;
 
     let mut manifest_data = vec![0u8; manifest_len];
     file.read_exact(&mut manifest_data)?;
 
     // Read payload length + payload
     file.read_exact(&mut len_buf)?;
-    let payload_len = u64::from_le_bytes(len_buf) as usize;
+    let payload_len = u64::from_le_bytes(len_buf);
+
+    // Sanity check: reject payloads larger than 4GB
+    if payload_len > 4 * 1024 * 1024 * 1024 {
+        return Err(CoreError::InvalidPayload(format!(
+            "Payload length {} exceeds maximum allowed size (4GB)", payload_len
+        )));
+    }
+    let payload_len = payload_len as usize;
 
     let mut payload_data = vec![0u8; payload_len];
     file.read_exact(&mut payload_data)?;
@@ -128,6 +144,18 @@ mod tests {
 
         let base_size = get_base_exe_size(&output).unwrap();
         assert_eq!(base_size, base_exe.len() as u64);
+
+        std::fs::remove_file(&output).ok();
+    }
+
+    #[test]
+    fn test_read_payload_invalid_no_marker() {
+        let temp_dir = std::env::temp_dir();
+        let output = temp_dir.join("velocity_test_no_marker.exe");
+        std::fs::write(&output, b"just some random content").unwrap();
+
+        let result = read_payload(&output);
+        assert!(result.is_err());
 
         std::fs::remove_file(&output).ok();
     }

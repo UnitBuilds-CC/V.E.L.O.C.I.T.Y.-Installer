@@ -4,6 +4,18 @@ use crate::error::{CoreError, Result};
 use tracing::{debug, info};
 use velocity_config::ServiceEntry;
 
+/// Validate a Windows service name.
+/// Service names must contain only alphanumeric characters, underscores, hyphens, or dots.
+fn validate_service_name(name: &str) -> Result<()> {
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        return Err(CoreError::other("service name", format!(
+            "Invalid service name: '{}'. Service names must contain only alphanumeric characters, underscores, hyphens, or dots.",
+            name
+        )));
+    }
+    Ok(())
+}
+
 /// Install and configure Windows services.
 pub fn install_services(services: &[ServiceEntry], install_dir: &std::path::Path) -> Result<()> {
     for svc in services {
@@ -16,9 +28,12 @@ pub fn install_services(services: &[ServiceEntry], install_dir: &std::path::Path
 fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<()> {
     let binary_path = install_dir.join(&svc.binary_path);
 
+    validate_service_name(&svc.name)?;
+
     info!("Installing service: {} ({})", svc.display_name, svc.name);
 
     // Use `sc create` command as a reliable way to install services
+    // Note: sc.exe requires "key= value" as a SINGLE argument (space after = is the separator)
     let start_type_flag = match svc.start_type.as_str() {
         "auto" => "auto",
         "manual" => "demand",
@@ -27,27 +42,30 @@ fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<
         _ => "auto",
     };
 
+    let bin_path_arg = format!("binPath= {}", binary_path.to_string_lossy());
+    let start_arg = format!("start= {}", start_type_flag);
+    let display_arg = format!("DisplayName= {}", svc.display_name);
+
     let mut cmd = std::process::Command::new("sc");
     cmd.args([
         "create",
         &svc.name,
-        "binPath=",
-        &binary_path.to_string_lossy(),
-        "start=",
-        start_type_flag,
-        "DisplayName=",
-        &svc.display_name,
+        &bin_path_arg,
+        &start_arg,
+        &display_arg,
     ]);
 
     // Add service account if specified
     if let Some(ref account) = svc.account {
-        cmd.args(["obj=", account]);
+        let obj_arg = format!("obj= {}", account);
+        cmd.arg(&obj_arg);
     }
 
     // Add dependencies if specified
     if !svc.dependencies.is_empty() {
         let deps = svc.dependencies.join("/");
-        cmd.args(["depend=", &deps]);
+        let depend_arg = format!("depend= {}", deps);
+        cmd.arg(&depend_arg);
     }
 
     let output = cmd.output()
@@ -104,6 +122,8 @@ pub fn remove_services(services: &[ServiceEntry]) -> Result<()> {
 
 /// Stop and remove a single service.
 fn remove_service(name: &str) -> Result<()> {
+    validate_service_name(name)?;
+
     info!("Removing service: {}", name);
 
     // Stop the service first
@@ -130,4 +150,28 @@ fn remove_service(name: &str) -> Result<()> {
 
     debug!("Service removed: {}", name);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_service_name_valid() {
+        assert!(validate_service_name("MyService").is_ok());
+        assert!(validate_service_name("my_service").is_ok());
+        assert!(validate_service_name("my-service").is_ok());
+        assert!(validate_service_name("my.service").is_ok());
+        assert!(validate_service_name("Service123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_service_name_invalid() {
+        assert!(validate_service_name("").is_err());
+        assert!(validate_service_name("my service").is_err());
+        assert!(validate_service_name("my/service").is_err());
+        assert!(validate_service_name("my\\service").is_err());
+        assert!(validate_service_name("my&service").is_err());
+        assert!(validate_service_name("my|service").is_err());
+    }
 }
