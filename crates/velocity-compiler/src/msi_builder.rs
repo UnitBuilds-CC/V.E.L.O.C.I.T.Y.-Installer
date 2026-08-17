@@ -755,11 +755,7 @@ fn populate_features(
     // Add user-defined components as sub-features
     for comp in &manifest.components {
         let feature_id = format!("Feature_{}", comp.id);
-        let parent = if comp.mandatory {
-            "Complete".to_string()
-        } else {
-            "Complete".to_string()
-        };
+        let parent = "Complete".to_string();
         let level = if comp.selected_by_default { 1 } else { 0 };
 
         let query = Insert::into("Feature").row(vec![
@@ -1171,8 +1167,6 @@ fn populate_custom_actions(
     package: &mut Package<Cursor<Vec<u8>>>,
     manifest: &VelocityManifest,
 ) -> Result<()> {
-    let _sequence = 1;
-
     // Standard sequence actions
     let standard_actions = vec![
         ("AppSearch", "", 100),
@@ -1294,7 +1288,7 @@ fn embed_file_streams(
     files: &[(PathBuf, String)],
 ) -> Result<()> {
     for (file_path, rel_path) in files {
-        let stream_name = format!("file_{}", rel_path.replace('\\', "_").replace('/', "_"));
+        let stream_name = format!("file_{}", rel_path.replace(['\\', '/'], "_"));
         let data = std::fs::read(file_path)?;
 
         let mut writer = package

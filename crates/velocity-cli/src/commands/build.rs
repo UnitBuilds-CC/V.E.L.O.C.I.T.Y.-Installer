@@ -133,8 +133,8 @@ fn generate_delta_update(
         .filter_map(|e| e.ok())
         .filter(|e| {
             let path = e.path();
-            path.extension().map_or(false, |ext| ext == "exe")
-                && path.file_stem().map_or(false, |stem| {
+            path.extension().is_some_and(|ext| ext == "exe")
+                && path.file_stem().is_some_and(|stem| {
                     stem.to_string_lossy().contains("installer")
                         || stem.to_string_lossy().contains("sample-app")
                 })

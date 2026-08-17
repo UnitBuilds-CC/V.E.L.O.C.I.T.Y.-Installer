@@ -215,7 +215,7 @@ pub fn generate_delta(
     }
 
     // Track deleted files
-    for (rel_path, _) in &old_files {
+    for rel_path in old_files.keys() {
         if !new_files.contains_key(rel_path) {
             let old_path = old_dir.join(rel_path);
             let old_content = fs::read(&old_path)?;
