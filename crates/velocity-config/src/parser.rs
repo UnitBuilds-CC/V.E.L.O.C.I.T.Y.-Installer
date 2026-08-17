@@ -39,6 +39,14 @@ fn validate_manifest(manifest: &VelocityManifest) -> Result<()> {
         });
     }
 
+    // App name must not contain path separators or null bytes
+    if manifest.app.name.contains(|c: char| c == '/' || c == '\\' || c == '\0') {
+        return Err(ConfigError::Validation(format!(
+            "App name '{}' must not contain path separators or null bytes",
+            manifest.app.name
+        )));
+    }
+
     // Version is required
     if manifest.app.version.is_empty() {
         return Err(ConfigError::MissingField {
@@ -89,6 +97,13 @@ fn validate_manifest(manifest: &VelocityManifest) -> Result<()> {
             return Err(ConfigError::Validation(format!(
                 "Invalid service start type '{}'. Must be one of: {:?}",
                 svc.start_type, valid_start_types
+            )));
+        }
+        // Service name must be safe (alphanumeric, underscore, hyphen, dot)
+        if svc.name.is_empty() || !svc.name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+            return Err(ConfigError::Validation(format!(
+                "Invalid service name '{}'. Must contain only alphanumeric characters, underscores, hyphens, or dots.",
+                svc.name
             )));
         }
     }
