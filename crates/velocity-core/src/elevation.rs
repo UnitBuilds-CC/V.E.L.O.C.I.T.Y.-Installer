@@ -1,15 +1,18 @@
 //! UAC elevation — request administrator privileges.
 //!
-//! Windows-only: uses Win32 Security API and ShellExecuteEx for UAC elevation.
-
-#![cfg(target_os = "windows")]
+//! Cross-platform: uses Win32 Security API on Windows, geteuid() on Unix.
+//! Elevation uses ShellExecuteEx "runas" on Windows, sudo/pkexec on Unix.
 
 use crate::error::{CoreError, Result};
-use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use tracing::{debug, info};
 
-/// Check if the current process is running with administrator privileges.
+// ===========================================================================
+// Windows implementation
+// ===========================================================================
+
+/// Check if the current process is running with administrator privileges (Windows).
+#[cfg(target_os = "windows")]
 pub fn is_admin() -> bool {
     use windows::Win32::Security::*;
 
@@ -49,13 +52,25 @@ pub fn is_admin() -> bool {
     }
 }
 
-/// Re-launch the current executable with administrator privileges via UAC elevation.
+/// Check if the current process is running with root privileges (Unix).
+#[cfg(not(target_os = "windows"))]
+pub fn is_admin() -> bool {
+    // SAFETY: geteuid is a simple libc call that always succeeds.
+    unsafe {
+        extern "C" {
+            fn geteuid() -> u32;
+        }
+        geteuid() == 0
+    }
+}
+
+/// Re-launch the current executable with administrator privileges.
 ///
 /// Returns `Ok(true)` if elevation was requested (caller should exit),
 /// `Ok(false)` if already elevated.
 pub fn elevate_if_needed(args: &[String]) -> Result<bool> {
     if is_admin() {
-        debug!("Already running as administrator");
+        debug!("Already running with elevated privileges");
         return Ok(false);
     }
 
@@ -64,17 +79,35 @@ pub fn elevate_if_needed(args: &[String]) -> Result<bool> {
 
     info!("Requesting elevation: {}", exe_path.display());
 
-    let result = shell_execute_elevated(&exe_path, args)?;
+    #[cfg(target_os = "windows")]
+    {
+        let result = shell_execute_elevated(&exe_path, args)?;
+        if result {
+            Ok(true)
+        } else {
+            Err(CoreError::ElevationRequired)
+        }
+    }
 
-    if result {
-        Ok(true)
-    } else {
-        Err(CoreError::ElevationRequired)
+    #[cfg(not(target_os = "windows"))]
+    {
+        let result = elevate_with_sudo(&exe_path, args)?;
+        if result {
+            Ok(true)
+        } else {
+            Err(CoreError::ElevationRequired)
+        }
     }
 }
 
+// ===========================================================================
+// Windows elevation (ShellExecuteEx "runas")
+// ===========================================================================
+
 /// Execute a program elevated via ShellExecuteExW with "runas".
+#[cfg(target_os = "windows")]
 fn shell_execute_elevated(exe_path: &Path, args: &[String]) -> Result<bool> {
+    use std::os::windows::ffi::OsStrExt;
     use windows::core::*;
     use windows::Win32::Foundation::*;
     use windows::Win32::UI::Shell::*;
@@ -126,5 +159,49 @@ fn shell_execute_elevated(exe_path: &Path, args: &[String]) -> Result<bool> {
                 Ok(false)
             }
         }
+    }
+}
+
+// ===========================================================================
+// Unix elevation (sudo / pkexec)
+// ===========================================================================
+
+/// Re-launch the current executable with root privileges via sudo or pkexec.
+#[cfg(not(target_os = "windows"))]
+fn elevate_with_sudo(exe_path: &Path, args: &[String]) -> Result<bool> {
+    let exe_str = exe_path.to_string_lossy();
+
+    // Try pkexec first (graphical polkit prompt on Linux), then sudo
+    for elevator in &["pkexec", "sudo"] {
+        let mut cmd = std::process::Command::new(elevator);
+        cmd.arg(&*exe_str);
+        for a in args {
+            cmd.arg(a);
+        }
+
+        match cmd.spawn() {
+            Ok(_child) => {
+                info!("Elevation requested via {}", elevator);
+                return Ok(true);
+            }
+            Err(e) => {
+                debug!("{} not available: {}", elevator, e);
+                continue;
+            }
+        }
+    }
+
+    debug!("No elevation mechanism available");
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_admin_returns_bool() {
+        // Just verify it doesn't panic and returns a bool
+        let _result = is_admin();
     }
 }

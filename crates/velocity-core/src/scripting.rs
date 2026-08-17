@@ -276,13 +276,7 @@ impl ScriptEngine {
                 let resolved = self.substitute(cmd);
                 let work_dir = action.working_dir.as_ref().map(|d| self.substitute(d));
 
-                let output = std::process::Command::new("cmd")
-                    .args(["/C", &resolved])
-                    .current_dir(work_dir.as_deref().unwrap_or("."))
-                    .output()
-                    .map_err(|e| {
-                        CoreError::other("shell command", format!("{}: {}", resolved, e))
-                    })?;
+                let output = run_shell(&resolved, work_dir.as_deref())?;
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -362,16 +356,36 @@ impl ScriptEngine {
     }
 }
 
+/// Run a shell command using the platform-appropriate shell.
+///
+/// Windows: `cmd /C <command>`
+/// Unix: `sh -c <command>`
+fn run_shell(cmd: &str, work_dir: Option<&str>) -> Result<std::process::Output> {
+    let dir = work_dir.unwrap_or(".");
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", cmd])
+            .current_dir(dir)
+            .output()
+            .map_err(|e| CoreError::other("shell command", format!("{}: {}", cmd, e)))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("sh")
+            .args(["-c", cmd])
+            .current_dir(dir)
+            .output()
+            .map_err(|e| CoreError::other("shell command", format!("{}: {}", cmd, e)))
+    }
+}
+
 /// Run a shell command action (non-method, for use in execute_shell_commands).
 fn run_shell_command(action: &ScriptAction) -> Result<()> {
     match &action.action {
         ActionType::ShellCommand(cmd) => {
             let work_dir = action.working_dir.as_deref().unwrap_or(".");
-            let output = std::process::Command::new("cmd")
-                .args(["/C", cmd])
-                .current_dir(work_dir)
-                .output()
-                .map_err(|e| CoreError::other("shell command", format!("{}: {}", cmd, e)))?;
+            let output = run_shell(cmd, Some(work_dir))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);

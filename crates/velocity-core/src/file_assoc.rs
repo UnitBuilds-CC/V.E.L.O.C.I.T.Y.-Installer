@@ -141,6 +141,7 @@ mod windows_impl {
 mod linux_impl {
     use super::*;
     use crate::error::{CoreError, Result};
+    use tracing::warn;
 
     pub fn apply_file_associations(
         associations: &[FileAssociationEntry],
@@ -194,9 +195,21 @@ mod linux_impl {
         })?;
 
         // 2. Register the MIME type with xdg-mime
-        let _ = std::process::Command::new("xdg-mime")
+        match std::process::Command::new("xdg-mime")
             .args(["default", &desktop_name, &mime_type])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!(
+                    "xdg-mime default failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Err(e) => {
+                warn!("xdg-mime not available: {}", e);
+            }
+            _ => {}
+        }
 
         // 3. Also add to mimeapps.list for the user
         let mimeapps_path = mimeapps_list_path();
@@ -266,7 +279,9 @@ mod linux_impl {
                 .filter(|l| !l.starts_with(&prefix))
                 .collect::<Vec<_>>()
                 .join("\n");
-            std::fs::write(&mimeapps_path, new_content).ok();
+            if let Err(e) = std::fs::write(&mimeapps_path, new_content) {
+                warn!("Failed to update mimeapps.list: {}", e);
+            }
         }
 
         logging::log_success(&format!("File association .{} removed", ext));

@@ -13,7 +13,7 @@ use velocity_config::EnvVarEntry;
 mod windows_impl {
     use super::*;
     use crate::error::{CoreError, Result};
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
     use winreg::enums::*;
     use winreg::RegKey;
 
@@ -120,13 +120,15 @@ mod windows_impl {
                     .collect::<Vec<_>>()
                     .join(";");
                 if new_value.is_empty() {
-                    root.delete_value(&entry.name).ok();
-                } else {
-                    root.set_value(&entry.name, &new_value).ok();
+                    if let Err(e) = root.delete_value(&entry.name) {
+                        warn!("Failed to delete env var {}: {}", entry.name, e);
+                    }
+                } else if let Err(e) = root.set_value(&entry.name, &new_value) {
+                    warn!("Failed to update env var {}: {}", entry.name, e);
                 }
             }
-        } else {
-            root.delete_value(&entry.name).ok();
+        } else if let Err(e) = root.delete_value(&entry.name) {
+            warn!("Failed to delete env var {}: {}", entry.name, e);
         }
 
         broadcast_env_change();
@@ -357,7 +359,7 @@ mod linux_impl {
 mod macos_impl {
     use super::*;
     use crate::error::{CoreError, Result};
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
 
     pub fn apply_env_vars(entries: &[EnvVarEntry]) -> Result<()> {
         for entry in entries {
@@ -406,9 +408,21 @@ mod macos_impl {
                     )
                 })?;
                 // Apply immediately
-                let _ = std::process::Command::new("launchctl")
+                match std::process::Command::new("launchctl")
                     .args(["setenv", &entry.name, &entry.value])
-                    .output();
+                    .output()
+                {
+                    Ok(output) if !output.status.success() => {
+                        warn!(
+                            "launchctl setenv failed: {}",
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("launchctl not available: {}", e);
+                    }
+                    _ => {}
+                }
             }
             _ => {
                 info!("Setting user env var: {} = {}", entry.name, entry.value);
@@ -461,11 +475,25 @@ mod macos_impl {
                         .filter(|l| !l.starts_with(&prefix))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    std::fs::write(conf, new_content).ok();
+                    if let Err(e) = std::fs::write(conf, new_content) {
+                        warn!("Failed to write {}: {}", conf, e);
+                    }
                 }
-                let _ = std::process::Command::new("launchctl")
+                match std::process::Command::new("launchctl")
                     .args(["unsetenv", &entry.name])
-                    .output();
+                    .output()
+                {
+                    Ok(output) if !output.status.success() => {
+                        warn!(
+                            "launchctl unsetenv failed: {}",
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("launchctl not available: {}", e);
+                    }
+                    _ => {}
+                }
             }
             _ => {
                 info!("Removing user env var: {}", entry.name);
@@ -478,7 +506,9 @@ mod macos_impl {
                         .filter(|l| !l.starts_with(&prefix))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    std::fs::write(&profile, new_content).ok();
+                    if let Err(e) = std::fs::write(&profile, new_content) {
+                        warn!("Failed to write {}: {}", profile, e);
+                    }
                 }
             }
         }

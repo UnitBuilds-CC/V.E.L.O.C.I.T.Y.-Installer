@@ -3,7 +3,7 @@
 use crate::error::{CoreError, Result};
 use crate::logging;
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 use velocity_config::VelocityManifest;
 
 use crate::file_assoc;
@@ -185,11 +185,19 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
         // Remove directories (deepest first)
         dirs_to_remove.sort_by(|a, b| b.cmp(a));
         for dir in &dirs_to_remove {
-            std::fs::remove_dir(dir).ok();
+            if let Err(e) = std::fs::remove_dir(dir) {
+                warn!("Failed to remove directory {}: {}", dir.display(), e);
+            }
         }
 
         // Try to remove the install directory itself
-        std::fs::remove_dir(install_dir).ok();
+        if let Err(e) = std::fs::remove_dir(install_dir) {
+            warn!(
+                "Failed to remove install directory {}: {}",
+                install_dir.display(),
+                e
+            );
+        }
 
         logging::log_success(&format!("Removed {} files", file_count));
     }

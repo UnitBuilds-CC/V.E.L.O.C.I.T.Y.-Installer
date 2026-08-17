@@ -15,7 +15,7 @@ mod windows_impl {
     use super::*;
     use crate::error::{CoreError, Result};
     use std::os::windows::ffi::OsStrExt;
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
     use windows::core::*;
     use windows::Win32::System::Com::*;
     use windows::Win32::UI::Shell::*;
@@ -200,7 +200,13 @@ mod windows_impl {
                     std::fs::remove_file(&lnk_path)?;
                     debug!("Removed: {}", lnk_path.display());
                 }
-                std::fs::remove_dir(&menu_dir).ok();
+                if let Err(e) = std::fs::remove_dir(&menu_dir) {
+                    warn!(
+                        "Failed to remove start menu directory {}: {}",
+                        menu_dir.display(),
+                        e
+                    );
+                }
             }
         }
         Ok(())
@@ -245,7 +251,7 @@ mod windows_impl {
 mod linux_impl {
     use super::*;
     use crate::error::{CoreError, Result};
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
 
     /// Create shortcuts based on the manifest configuration.
     pub fn create_shortcuts(
@@ -375,7 +381,13 @@ mod linux_impl {
                 std::fs::remove_file(&path)?;
                 debug!("Removed: {}", path.display());
             }
-            std::fs::remove_dir(&menu_dir).ok();
+            if let Err(e) = std::fs::remove_dir(&menu_dir) {
+                warn!(
+                    "Failed to remove application menu directory {}: {}",
+                    menu_dir.display(),
+                    e
+                );
+            }
         }
         Ok(())
     }
@@ -388,7 +400,7 @@ mod linux_impl {
 mod macos_impl {
     use super::*;
     use crate::error::{CoreError, Result};
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
 
     /// Create shortcuts based on the manifest configuration.
     pub fn create_shortcuts(
@@ -478,7 +490,13 @@ mod macos_impl {
                 std::fs::remove_file(&path)?;
                 debug!("Removed: {}", path.display());
             }
-            std::fs::remove_dir(&menu_dir).ok();
+            if let Err(e) = std::fs::remove_dir(&menu_dir) {
+                warn!(
+                    "Failed to remove Applications directory {}: {}",
+                    menu_dir.display(),
+                    e
+                );
+            }
         }
         Ok(())
     }
