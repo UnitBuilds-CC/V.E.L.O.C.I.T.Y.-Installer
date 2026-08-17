@@ -1,6 +1,7 @@
 //! High-level wizard orchestrator — selects and runs the appropriate UI theme.
 
 use crate::classic;
+use crate::native_wizard;
 use crate::error::{UiError, Result};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,16 +14,17 @@ pub struct InstallWizardResult {
     pub install_dir: PathBuf,
     pub cancelled: bool,
     pub launch_after: bool,
+    pub selected_components: Vec<String>,
 }
 
 /// Run the installer wizard based on the manifest's UI configuration.
 pub fn run_install_wizard(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
     match manifest.ui.theme.as_str() {
         "classic" => run_classic(manifest),
-        "modern" => {
-            // Modern theme uses the classic wizard with enhanced styling
-            tracing::info!("Using classic wizard with modern theme settings");
-            run_classic(manifest)
+        "modern" | "native" => {
+            // Modern/native themes use the real Win32 wizard window
+            tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
+            run_native(manifest)
         }
         _ => Err(UiError::Other(format!(
             "Unknown theme: {}",
@@ -43,6 +45,23 @@ fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         install_dir: result.install_dir,
         cancelled: false,
         launch_after: result.launch_after,
+        selected_components: Vec::new(),
+    })
+}
+
+/// Run the native Win32 wizard and map to InstallWizardResult.
+fn run_native(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
+    let result = native_wizard::run_native_wizard(manifest)?;
+
+    if result.cancelled {
+        return Err(UiError::Cancelled);
+    }
+
+    Ok(InstallWizardResult {
+        install_dir: result.install_dir,
+        cancelled: false,
+        launch_after: result.launch_after,
+        selected_components: result.selected_components,
     })
 }
 

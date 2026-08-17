@@ -326,6 +326,245 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m
             },
         },
+        LanguageEntry {
+            code: "it".to_string(),
+            name: "Italiano".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Avanti >".into());
+                m.insert("btn_back".into(), "< &Indietro".into());
+                m.insert("btn_install".into(), "&Installa".into());
+                m.insert("btn_finish".into(), "&Fine".into());
+                m.insert("btn_cancel".into(), "Annulla".into());
+                m.insert("btn_browse".into(), "&Sfoglia...".into());
+                m.insert("btn_yes".into(), "&Si".into());
+                m.insert("btn_no".into(), "&No".into());
+                m.insert("wizard_welcome_title".into(), "Benvenuto".into());
+                m.insert("wizard_install_title".into(), "Installazione".into());
+                m.insert("wizard_finish_title".into(), "Installazione completata".into());
+                m.insert("msg_confirm_cancel".into(), "Si desidera annullare l'installazione?".into());
+                m.insert("msg_extracting".into(), "Estrazione file...".into());
+                m.insert("msg_install_complete".into(), "{app_name} e stato installato correttamente.".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "nl".to_string(),
+            name: "Nederlands".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Volgende >".into());
+                m.insert("btn_back".into(), "< &Vorige".into());
+                m.insert("btn_install".into(), "&Installeren".into());
+                m.insert("btn_finish".into(), "&Voltooien".into());
+                m.insert("btn_cancel".into(), "Annuleren".into());
+                m.insert("btn_browse".into(), "&Bladeren...".into());
+                m.insert("wizard_welcome_title".into(), "Welkom".into());
+                m.insert("wizard_install_title".into(), "Installatie".into());
+                m.insert("wizard_finish_title".into(), "Installatie voltooid".into());
+                m.insert("msg_extracting".into(), "Bestanden uitpakken...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "ru".to_string(),
+            name: "Русский".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Далее >".into());
+                m.insert("btn_back".into(), "< &Назад".into());
+                m.insert("btn_install".into(), "&Установить".into());
+                m.insert("btn_finish".into(), "&Готово".into());
+                m.insert("btn_cancel".into(), "Отмена".into());
+                m.insert("btn_browse".into(), "&Обзор...".into());
+                m.insert("btn_yes".into(), "&Да".into());
+                m.insert("btn_no".into(), "&Нет".into());
+                m.insert("wizard_welcome_title".into(), "Добро пожаловать".into());
+                m.insert("wizard_install_title".into(), "Установка".into());
+                m.insert("wizard_finish_title".into(), "Установка завершена".into());
+                m.insert("msg_confirm_cancel".into(), "Вы действительно хотите отменить установку?".into());
+                m.insert("msg_extracting".into(), "Распаковка файлов...".into());
+                m.insert("msg_install_complete".into(), "{app_name} успешно установлен.".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "pl".to_string(),
+            name: "Polski".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Dalej >".into());
+                m.insert("btn_back".into(), "< &Wstecz".into());
+                m.insert("btn_install".into(), "&Zainstaluj".into());
+                m.insert("btn_finish".into(), "&Zakoncz".into());
+                m.insert("btn_cancel".into(), "Anuluj".into());
+                m.insert("btn_browse".into(), "&Przegladaj...".into());
+                m.insert("wizard_welcome_title".into(), "Witamy".into());
+                m.insert("wizard_install_title".into(), "Instalacja".into());
+                m.insert("wizard_finish_title".into(), "Instalacja zakonczona".into());
+                m.insert("msg_extracting".into(), "Rozpakiwanie plikow...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "sv".to_string(),
+            name: "Svenska".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Nasta >".into());
+                m.insert("btn_back".into(), "< &Tillbaka".into());
+                m.insert("btn_install".into(), "&Installera".into());
+                m.insert("btn_finish".into(), "&Slutför".into());
+                m.insert("btn_cancel".into(), "Avbryt".into());
+                m.insert("btn_browse".into(), "&Blaeddra...".into());
+                m.insert("wizard_welcome_title".into(), "Valkommen".into());
+                m.insert("wizard_install_title".into(), "Installation".into());
+                m.insert("wizard_finish_title".into(), "Installationen ar klar".into());
+                m.insert("msg_extracting".into(), "Packar upp filer...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "tr".to_string(),
+            name: "Turkce".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Ileri >".into());
+                m.insert("btn_back".into(), "< &Geri".into());
+                m.insert("btn_install".into(), "&Yukle".into());
+                m.insert("btn_finish".into(), "&Bitir".into());
+                m.insert("btn_cancel".into(), "Iptal".into());
+                m.insert("btn_browse".into(), "&Gozat...".into());
+                m.insert("wizard_welcome_title".into(), "Hos Geldiniz".into());
+                m.insert("wizard_install_title".into(), "Yukleniyor".into());
+                m.insert("wizard_finish_title".into(), "Yukleme Tamamlandi".into());
+                m.insert("msg_extracting".into(), "Dosyalar cikariliyor...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "ar".to_string(),
+            name: "العربية".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "> التالي(&N)".into());
+                m.insert("btn_back".into(), "(&B) السابق <".into());
+                m.insert("btn_install".into(), "(&I) تثبيت".into());
+                m.insert("btn_finish".into(), "(&F) انهاء".into());
+                m.insert("btn_cancel".into(), "الغاء".into());
+                m.insert("btn_browse".into(), "...استعراض(&B)".into());
+                m.insert("wizard_welcome_title".into(), "مرحبا".into());
+                m.insert("wizard_install_title".into(), "جارٍ التثبيت".into());
+                m.insert("wizard_finish_title".into(), "اكتمل التثبيت".into());
+                m.insert("msg_extracting".into(), "...جارٍ استخراج الملفات".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "cs".to_string(),
+            name: "Cesky".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Dale >".into());
+                m.insert("btn_back".into(), "< &Zpet".into());
+                m.insert("btn_install".into(), "&Instalovat".into());
+                m.insert("btn_finish".into(), "&Dokonciti".into());
+                m.insert("btn_cancel".into(), "Zrusit".into());
+                m.insert("btn_browse".into(), "&Prochazet...".into());
+                m.insert("wizard_welcome_title".into(), "Vitejte".into());
+                m.insert("wizard_install_title".into(), "Instalace".into());
+                m.insert("wizard_finish_title".into(), "Instalace dokoncena".into());
+                m.insert("msg_extracting".into(), "Rozbalovani souboru...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "hu".to_string(),
+            name: "Magyar".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Tovabb >".into());
+                m.insert("btn_back".into(), "< &Vissza".into());
+                m.insert("btn_install".into(), "&Telepites".into());
+                m.insert("btn_finish".into(), "&Befejezes".into());
+                m.insert("btn_cancel".into(), "Megse".into());
+                m.insert("wizard_welcome_title".into(), "Udvozoljuk".into());
+                m.insert("wizard_install_title".into(), "Telepites".into());
+                m.insert("wizard_finish_title".into(), "A telepites befejezodott".into());
+                m.insert("msg_extracting".into(), "Fajlok kibontasa...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "ro".to_string(),
+            name: "Romana".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Urmatorul >".into());
+                m.insert("btn_back".into(), "< &Inapoi".into());
+                m.insert("btn_install".into(), "&Instalare".into());
+                m.insert("btn_finish".into(), "&Finalizare".into());
+                m.insert("btn_cancel".into(), "Anulare".into());
+                m.insert("btn_browse".into(), "&Rasfoire...".into());
+                m.insert("wizard_welcome_title".into(), "Bun venit".into());
+                m.insert("wizard_install_title".into(), "Instalare".into());
+                m.insert("wizard_finish_title".into(), "Instalare completa".into());
+                m.insert("msg_extracting".into(), "Extragere fisiere...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "uk".to_string(),
+            name: "Українська".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Дали >".into());
+                m.insert("btn_back".into(), "< &Назад".into());
+                m.insert("btn_install".into(), "&Встановити".into());
+                m.insert("btn_finish".into(), "&Готово".into());
+                m.insert("btn_cancel".into(), "Скасувати".into());
+                m.insert("btn_browse".into(), "&Огляд...".into());
+                m.insert("wizard_welcome_title".into(), "Ласкаво просимо".into());
+                m.insert("wizard_install_title".into(), "Встановлення".into());
+                m.insert("wizard_finish_title".into(), "Встановлення завершено".into());
+                m.insert("msg_extracting".into(), "Розпакування файлів...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "vi".to_string(),
+            name: "Tieng Viet".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "&Tiep >".into());
+                m.insert("btn_back".into(), "< &Quay lai".into());
+                m.insert("btn_install".into(), "&Cai dat".into());
+                m.insert("btn_finish".into(), "&Hoan tat".into());
+                m.insert("btn_cancel".into(), "Huy".into());
+                m.insert("wizard_welcome_title".into(), "Chao mung".into());
+                m.insert("wizard_install_title".into(), "Dang cai dat".into());
+                m.insert("wizard_finish_title".into(), "Cai dat hoan tat".into());
+                m.insert("msg_extracting".into(), "Dang giai nen tap tin...".into());
+                m
+            },
+        },
+        LanguageEntry {
+            code: "th".to_string(),
+            name: "ภาษาไทย".to_string(),
+            strings: {
+                let mut m = HashMap::new();
+                m.insert("btn_next".into(), "> ถัดไป(&N)".into());
+                m.insert("btn_back".into(), "(&B) ย้อนกลับ <".into());
+                m.insert("btn_install".into(), "(&I) ติดตั้ง".into());
+                m.insert("btn_finish".into(), "(&F) เสร็จสิ้น".into());
+                m.insert("btn_cancel".into(), "ยกเลิก".into());
+                m.insert("wizard_welcome_title".into(), "ยินดีต้อนรับ".into());
+                m.insert("wizard_install_title".into(), "กำลังติดตั้ง".into());
+                m.insert("wizard_finish_title".into(), "ติดตั้งเสร็จสมบูรณ์".into());
+                m.insert("msg_extracting".into(), "กำลังแตกไฟล์...".into());
+                m
+            },
+        },
     ]
 }
 

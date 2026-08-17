@@ -145,6 +145,7 @@ fn main() -> Result<()> {
             install_dir: std::path::PathBuf::from(install_dir),
             cancelled: false,
             launch_after: false,
+            selected_components: Vec::new(),
         }
     } else {
         match velocity_ui::run_install_wizard(&manifest) {
