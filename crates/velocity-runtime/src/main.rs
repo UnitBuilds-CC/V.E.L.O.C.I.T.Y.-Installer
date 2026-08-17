@@ -102,6 +102,24 @@ fn main() -> Result<()> {
 
     info!("Installing: {} v{}", manifest.app.name, manifest.app.version);
 
+    // Detect system architecture for path resolution
+    let sys_info = velocity_core::arch_detect::detect_system_info();
+    let install_64bit = velocity_core::arch_detect::default_install_mode(&manifest.install.arch);
+    info!("System: {} (64bit install: {})", sys_info.os_arch, install_64bit);
+
+    // Check architecture compatibility
+    if !velocity_core::arch_detect::is_arch_compatible(&manifest.install.arch) {
+        let err_msg = format!(
+            "This installer requires a {} system, but your system is {}.",
+            manifest.install.arch, sys_info.os_arch
+        );
+        error!("{}", err_msg);
+        if !args.silent {
+            velocity_ui::classic::show_error("Architecture Mismatch", &err_msg);
+        }
+        return Err(anyhow::anyhow!("{}", err_msg));
+    }
+
     // Initialize file-based logging
     let _log_path = logging::init_temp_logger(&manifest.app.name).ok();
     logging::log(&format!("=== Installing {} v{} ===", manifest.app.name, manifest.app.version));
@@ -110,9 +128,18 @@ fn main() -> Result<()> {
     let wizard_result = if args.silent {
         // Silent mode: use defaults
         let install_dir = args.dir.clone().unwrap_or_else(|| {
-            velocity_config::VariableResolver::new(
+            // Use architecture-aware path resolution
+            let default_path = velocity_config::VariableResolver::new(
                 &std::path::PathBuf::from(format!("C:\\Program Files\\{}", manifest.app.name)),
-            ).resolve(&manifest.install.default_dir)
+            ).resolve(&manifest.install.default_dir);
+
+            // Resolve {autopf} variable if present
+            if default_path.contains("{autopf}") {
+                let pf = velocity_core::arch_detect::program_files_dir(install_64bit);
+                default_path.replace("{autopf}", &pf.to_string_lossy())
+            } else {
+                default_path
+            }
         });
         velocity_ui::InstallWizardResult {
             install_dir: std::path::PathBuf::from(install_dir),
@@ -533,6 +560,14 @@ fn main() -> Result<()> {
     // Installation successful — clear rollback tracker
     rollback.clear();
     logging::log_success("Installation completed successfully!");
+
+    // Check if a reboot is needed (files locked during install)
+    let reboot_needed = velocity_core::reboot::is_velocity_reboot_requested()
+        || velocity_core::reboot::is_reboot_pending();
+    if reboot_needed {
+        info!("System reboot is pending/required");
+        logging::log_warning("A system reboot is required to complete the installation.");
+    }
 
     // Step 17: Show completion
     let should_launch = if !args.silent {

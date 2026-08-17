@@ -4,6 +4,7 @@
 
 pub mod classic;
 pub mod wizard;
+pub mod progress_dialog;
 pub mod error;
 
 pub use error::*;
