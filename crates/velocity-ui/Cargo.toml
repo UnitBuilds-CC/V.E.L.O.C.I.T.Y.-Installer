@@ -21,7 +21,12 @@ windows = { workspace = true }
 webview2-com = { workspace = true }
 winreg = { workspace = true }
 
-# Cross-platform GUI (for future wry+tao wizard)
+# Cross-platform GUI (wry+tao wizard)
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 wry = { workspace = true }
 tao = { workspace = true }
+http = "1"
+
+# Linux needs GTK for wry's webkit2gtk backend
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

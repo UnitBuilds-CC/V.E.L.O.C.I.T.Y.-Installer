@@ -19,6 +19,9 @@ pub enum UiError {
 
     #[error("WebView2 runtime is not installed")]
     WebView2NotAvailable,
+
+    #[error("WebView error: {0}")]
+    WebView(String),
 }
 
 pub type Result<T> = std::result::Result<T, UiError>;

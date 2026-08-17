@@ -30,11 +30,11 @@ pub fn run_install_wizard_with_payload(
     manifest: &VelocityManifest,
     _payload_data: Option<Vec<u8>>,
 ) -> Result<InstallWizardResult> {
-    // On non-Windows, always use the terminal wizard
+    // On non-Windows, use the wry+tao GUI wizard
     #[cfg(not(target_os = "windows"))]
     {
-        tracing::info!("Using terminal wizard for non-Windows platform");
-        return crate::cross_platform::run_terminal_wizard(manifest);
+        tracing::info!("Using wry+tao GUI wizard for non-Windows platform");
+        return crate::wry_wizard::run_wry_wizard(manifest);
     }
 
     // On Windows, select the appropriate GUI wizard

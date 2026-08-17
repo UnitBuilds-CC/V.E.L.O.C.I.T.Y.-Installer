@@ -3697,6 +3697,8 @@ name = "velocity-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "gtk",
+ "http",
  "serde",
  "serde_json",
  "tao",
