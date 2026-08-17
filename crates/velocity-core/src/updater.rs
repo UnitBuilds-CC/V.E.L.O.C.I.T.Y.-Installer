@@ -11,12 +11,27 @@ use tracing::{debug, info, warn};
 pub struct UpdateInfo {
     /// Latest available version string
     pub latest_version: String,
-    /// Download URL for the update
+    /// Download URL for the full update
     pub download_url: String,
     /// Release notes / chang
     pub release_notes: Option<String>,
     /// Whether an update is available
     pub update_available: bool,
+    /// Delta update information (if available)
+    pub delta: Option<DeltaInfo>,
+}
+
+/// Delta update information.
+#[derive(Debug, Clone)]
+pub struct DeltaInfo {
+    /// Download URL for the delta package
+    pub url: String,
+    /// Size of the delta package in bytes
+    pub size: u64,
+    /// Size of the full package in bytes
+    pub full_size: u64,
+    /// Number of intermediate versions (for multi-hop updates)
+    pub hops: u32,
 }
 
 /// Check for updates by querying a version endpoint.
@@ -39,6 +54,7 @@ pub fn check_for_update(current_version: &str, update_url: &str) -> Result<Updat
             download_url: String::new(),
             release_notes: None,
             update_available: false,
+            delta: None,
         });
     }
 
@@ -55,6 +71,7 @@ pub fn check_for_update(current_version: &str, update_url: &str) -> Result<Updat
                 download_url: String::new(),
                 release_notes: None,
                 update_available: false,
+                delta: None,
             });
         }
     };
@@ -124,12 +141,101 @@ fn fetch_update_info(url: &str) -> Result<UpdateInfo> {
     let download_url = json["download_url"].as_str().unwrap_or("").to_string();
     let release_notes = json["release_notes"].as_str().map(|s| s.to_string());
 
+    // Parse delta information if available
+    let delta = if let Some(delta_json) = json.get("delta") {
+        let delta_url = delta_json["url"].as_str().unwrap_or("").to_string();
+        let delta_size = delta_json["size"].as_u64().unwrap_or(0);
+        let full_size = delta_json["full_size"].as_u64().unwrap_or(0);
+        let hops = delta_json["hops"].as_u64().unwrap_or(0) as u32;
+
+        if !delta_url.is_empty() && delta_size > 0 {
+            Some(DeltaInfo {
+                url: delta_url,
+                size: delta_size,
+                full_size,
+                hops,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Ok(UpdateInfo {
         latest_version,
         download_url,
         release_notes,
         update_available: false, // Will be set by caller
+        delta,
     })
+}
+
+/// Decide whether to use delta or full update based on size heuristic.
+///
+/// Returns true if delta should be used (smaller total size), false for full update.
+pub fn should_use_delta(delta_info: &Option<DeltaInfo>, full_size: u64) -> bool {
+    match delta_info {
+        Some(delta) => {
+            // Heuristic: use delta if it's less than 70% of full size
+            // and not too many hops (max 5)
+            let delta_threshold = (full_size as f64 * 0.7) as u64;
+            let use_delta = delta.size < delta_threshold && delta.hops <= 5;
+            
+            if use_delta {
+                info!(
+                    "Using delta update: {} bytes (vs {} bytes full, {}% reduction)",
+                    delta.size,
+                    full_size,
+                    ((1.0 - delta.size as f64 / full_size as f64) * 100.0) as u32
+                );
+            } else {
+                info!(
+                    "Using full update: delta {} bytes >= 70% of full {} bytes, or too many hops ({})",
+                    delta.size, full_size, delta.hops
+                );
+            }
+            
+            use_delta
+        }
+        None => false,
+    }
+}
+
+/// Download and apply a delta update.
+///
+/// Downloads the delta package, applies it to the current installation,
+/// and verifies the result.
+pub fn apply_delta_update(
+    install_dir: &std::path::Path,
+    delta_info: &DeltaInfo,
+) -> Result<()> {
+    use crate::delta::{apply_delta, load_delta_package};
+
+    info!("Downloading delta update from: {}", delta_info.url);
+
+    // Download delta package
+    let delta_data = crate::downloader::download_to_memory(&delta_info.url)?;
+    
+    info!("Downloaded {} bytes", delta_data.len());
+
+    // Save to temporary file
+    let temp_delta = install_dir.join(".delta-temp.zip");
+    std::fs::write(&temp_delta, &delta_data)?;
+
+    // Load delta package
+    let delta = load_delta_package(&temp_delta)?;
+
+    // Apply delta
+    info!("Applying delta: {} -> {}", delta.from_version, delta.to_version);
+    apply_delta(&delta, install_dir)?;
+
+    // Cleanup temporary file
+    std::fs::remove_file(&temp_delta)?;
+
+    info!("Delta update applied successfully");
+
+    Ok(())
 }
 
 #[cfg(test)]
