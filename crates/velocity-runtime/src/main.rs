@@ -191,9 +191,10 @@ fn main() -> Result<()> {
             cancelled: false,
             launch_after: false,
             selected_components: Vec::new(),
+            install_completed: false,
         }
     } else {
-        match velocity_ui::run_install_wizard(&manifest) {
+        match velocity_ui::run_install_wizard_with_payload(&manifest, Some(payload_data.clone())) {
             Ok(result) => result,
             Err(velocity_ui::UiError::Cancelled) => {
                 info!("Installation cancelled by user");
@@ -314,43 +315,59 @@ fn main() -> Result<()> {
     }
 
     // Step 7: Extract files with rollback tracking
-    info!("Extracting files...");
     let mut rollback = RollbackTracker::new();
-    
-    let progress_cb: velocity_core::extract::ProgressCallback = Box::new(
-        |current, total, name| {
-            velocity_ui::show_progress(current, total, name);
-            logging::log_extract(name);
-        },
-    );
-    
-    let extracted = match velocity_core::extract::extract_archive(
-        &payload_data,
-        install_dir,
-        Some(&progress_cb),
-    ) {
-        Ok(files) => {
-            for f in &files {
-                rollback.track_file(f.clone());
-            }
-            files
+    let extracted: Vec<std::path::PathBuf>;
+
+    if wizard_result.install_completed {
+        // The native wizard already extracted files — just collect them for rollback tracking
+        info!("Files already extracted by wizard, collecting file list for tracking...");
+        logging::log_success("Files already extracted by wizard");
+        extracted = walkdir::WalkDir::new(install_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().to_path_buf())
+            .collect();
+        for f in &extracted {
+            rollback.track_file(f.clone());
         }
-        Err(e) => {
-            error!("Extraction failed: {}", e);
-            logging::log_error("EXTRACT", &e.to_string());
-            logging::log("Rolling back...");
-            let _ = rollback.rollback();
-            if !args.silent {
-                velocity_ui::classic::show_error(
-                    "Installation Failed",
-                    &format!("File extraction failed.\n\nError: {}\n\nThe installation has been rolled back.", e),
-                );
+    } else {
+        info!("Extracting files...");
+        let progress_cb: velocity_core::extract::ProgressCallback = Box::new(
+            |current, total, name| {
+                velocity_ui::show_progress(current, total, name);
+                logging::log_extract(name);
+            },
+        );
+        
+        extracted = match velocity_core::extract::extract_archive(
+            &payload_data,
+            install_dir,
+            Some(&progress_cb),
+        ) {
+            Ok(files) => {
+                for f in &files {
+                    rollback.track_file(f.clone());
+                }
+                files
             }
-            return Err(e.into());
-        }
-    };
-    info!("Extracted {} files", extracted.len());
-    logging::log_success(&format!("Extracted {} files", extracted.len()));
+            Err(e) => {
+                error!("Extraction failed: {}", e);
+                logging::log_error("EXTRACT", &e.to_string());
+                logging::log("Rolling back...");
+                let _ = rollback.rollback();
+                if !args.silent {
+                    velocity_ui::classic::show_error(
+                        "Installation Failed",
+                        &format!("File extraction failed.\n\nError: {}\n\nThe installation has been rolled back.", e),
+                    );
+                }
+                return Err(e.into());
+            }
+        };
+        info!("Extracted {} files", extracted.len());
+        logging::log_success(&format!("Extracted {} files", extracted.len()));
+    }
 
     // Step 7.1: Verify checksums if enabled
     if manifest.install.verify_checksums {

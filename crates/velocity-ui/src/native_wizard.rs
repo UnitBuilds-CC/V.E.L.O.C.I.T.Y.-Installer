@@ -12,6 +12,7 @@
 use crate::error::Result;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::Arc;
 use tracing::info;
 use velocity_config::VelocityManifest;
 use windows::core::*;
@@ -34,6 +35,9 @@ const CHK_LAUNCH_ID: u16 = 1017;
 const PAGE_TITLE_ID: u16 = 1020;
 const PAGE_DESC_ID: u16 = 1021;
 
+// Timer ID for progress updates
+const TIMER_PROGRESS: usize = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WizardPage { Welcome, License, Directory, Components, Installing, Finished }
 
@@ -43,6 +47,7 @@ pub struct WizardState {
     pub current_file: std::sync::Mutex<String>,
     pub cancelled: AtomicBool,
     pub install_complete: AtomicBool,
+    pub install_error: std::sync::Mutex<Option<String>>,
 }
 
 impl WizardState {
@@ -52,6 +57,7 @@ impl WizardState {
             current_file: std::sync::Mutex::new(String::new()),
             cancelled: AtomicBool::new(false),
             install_complete: AtomicBool::new(false),
+            install_error: std::sync::Mutex::new(None),
         }
     }
 }
@@ -63,6 +69,7 @@ pub struct NativeWizardResult {
     pub cancelled: bool,
     pub launch_after: bool,
     pub selected_components: Vec<String>,
+    pub install_completed: bool,
 }
 
 struct WizardData {
@@ -77,6 +84,10 @@ struct WizardData {
     selected_components: Vec<String>,
     all_components: Vec<String>,
     launch_after: bool,
+    install_completed: bool,
+    // Payload for extraction during install phase
+    payload_data: Option<Vec<u8>>,
+    wizard_state: Option<Arc<WizardState>>,
     h_page_title: HWND,
     h_page_desc: HWND,
     h_sidebar_title: HWND,
@@ -94,7 +105,14 @@ struct WizardData {
 }
 
 /// Run the native Win32 wizard.
-pub fn run_native_wizard(manifest: &VelocityManifest) -> Result<NativeWizardResult> {
+///
+/// If `payload_data` is provided, the wizard will perform extraction during
+/// the Installing page and show real progress. Otherwise, it just collects
+/// user choices and returns.
+pub fn run_native_wizard(
+    manifest: &VelocityManifest,
+    payload_data: Option<Vec<u8>>,
+) -> Result<NativeWizardResult> {
     info!("Starting native wizard for: {}", manifest.app.name);
 
     let default_dir = velocity_config::VariableResolver::new(
@@ -113,6 +131,7 @@ pub fn run_native_wizard(manifest: &VelocityManifest) -> Result<NativeWizardResu
     run_wizard_window(
         &manifest.app.name, &manifest.app.version, &default_dir,
         has_license, has_components, &license_text, accent, &components,
+        payload_data,
     )
 }
 
@@ -135,6 +154,7 @@ fn run_wizard_window(
     app_name: &str, version: &str, default_dir: &str,
     has_license: bool, has_components: bool, license_text: &str,
     accent_rgb: [u8; 3], components: &[String],
+    payload_data: Option<Vec<u8>>,
 ) -> Result<NativeWizardResult> {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
@@ -163,6 +183,8 @@ fn run_wizard_window(
             license_text: license_text.to_string(), accent_rgb,
             pages, page_idx: 0, selected_components: Vec::new(),
             all_components: components.to_vec(), launch_after: false,
+            install_completed: false,
+            payload_data, wizard_state: None,
             h_page_title: HWND::default(), h_page_desc: HWND::default(),
             h_sidebar_title: HWND::default(), h_sidebar_ver: HWND::default(),
             h_license: HWND::default(), h_dir_edit: HWND::default(),
@@ -217,6 +239,7 @@ fn run_wizard_window(
                 return Ok(NativeWizardResult {
                     install_dir: PathBuf::from(default_dir), cancelled: true,
                     launch_after: false, selected_components: Vec::new(),
+                    install_completed: false,
                 });
             }
         }
@@ -226,6 +249,7 @@ fn run_wizard_window(
             install_dir: PathBuf::from(&data.install_dir),
             cancelled: false, launch_after: data.launch_after,
             selected_components: data.selected_components,
+            install_completed: data.install_completed,
         })
     }
 }
@@ -291,6 +315,45 @@ unsafe extern "system" fn wizard_wnd_proc(
             LRESULT(0)
         }
         WM_DESTROY => { PostQuitMessage(0); LRESULT(0) }
+        WM_TIMER => {
+            if wparam.0 == TIMER_PROGRESS && !dp.is_null() {
+                let d = &mut *dp;
+                if let Some(ref state) = d.wizard_state {
+                    let pct = state.progress_pct.load(std::sync::atomic::Ordering::Relaxed);
+                    // Update progress bar
+                    let _ = SendMessageW(d.h_progress, PBM_SETPOS, WPARAM(pct as usize), LPARAM(0));
+                    // Update file label
+                    if let Ok(file) = state.current_file.lock() {
+                        if !file.is_empty() {
+                            let label = if file.len() > 45 {
+                                format!("...{}", &file[file.len()-42..])
+                            } else {
+                                file.clone()
+                            };
+                            let w = wn(&format!("{} — {}%", label, pct));
+                            let _ = SetWindowTextW(d.h_file_label, PCWSTR(w.as_ptr()));
+                        }
+                    }
+                    // Check if installation is complete
+                    if state.install_complete.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = KillTimer(hwnd, TIMER_PROGRESS);
+                        // Check for errors
+                        let error = state.install_error.lock().ok().and_then(|e| e.clone());
+                        if let Some(err_msg) = error {
+                            let ew = wn(&format!("Installation failed:\n\n{}", err_msg));
+                            let tw = wn("Installation Error");
+                            let _ = MessageBoxW(hwnd, PCWSTR(ew.as_ptr()), PCWSTR(tw.as_ptr()), MB_OK | MB_ICONERROR);
+                            let _ = DestroyWindow(hwnd);
+                        } else {
+                            d.install_completed = true;
+                            d.page_idx += 1;
+                            show_page(hwnd, d);
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -533,9 +596,79 @@ unsafe fn handle_next(hwnd: HWND, d: &mut WizardData) {
             if d.page_idx < d.pages.len() - 1 {
                 d.page_idx += 1;
                 show_page(hwnd, d);
+                // If we just entered the Installing page and have payload, start extraction
+                if d.pages[d.page_idx] == WizardPage::Installing {
+                    if let Some(payload) = d.payload_data.take() {
+                        start_installation(hwnd, d, payload);
+                    } else {
+                        // No payload — just advance to finished (runtime handles extraction)
+                        d.install_completed = true;
+                        d.page_idx += 1;
+                        show_page(hwnd, d);
+                    }
+                }
             }
         }
     }
+}
+
+/// Start the installation process in a background thread.
+unsafe fn start_installation(hwnd: HWND, d: &mut WizardData, payload: Vec<u8>) {
+    let state = Arc::new(WizardState::new());
+    d.wizard_state = Some(state.clone());
+
+    let install_dir = d.install_dir.clone();
+    let app_name = d.app_name.clone();
+
+    // Hide navigation buttons during installation
+    let _ = ShowWindow(d.h_back, SW_HIDE);
+    let _ = ShowWindow(d.h_next, SW_HIDE);
+
+    // Set timer for progress updates (100ms interval)
+    let _ = SetTimer(hwnd, TIMER_PROGRESS, 100, None);
+
+    // Spawn extraction thread
+    std::thread::spawn(move || {
+        info!("Installation thread started for: {}", app_name);
+        let dir = std::path::Path::new(&install_dir);
+
+        // Create install directory
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            if let Ok(mut err) = state.install_error.lock() {
+                *err = Some(format!("Failed to create directory: {}", e));
+            }
+            state.install_complete.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+
+        // Extract payload
+        let progress_cb: velocity_core::extract::ProgressCallback = Box::new({
+            let state = state.clone();
+            move |current: usize, total: usize, name: &str| {
+                let pct = if total > 0 {
+                    ((current as f64 / total as f64) * 100.0) as u32
+                } else { 0 };
+                state.progress_pct.store(pct.min(100), std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut f) = state.current_file.lock() {
+                    *f = name.to_string();
+                }
+            }
+        });
+
+        match velocity_core::extract::extract_archive(&payload, dir, Some(&progress_cb)) {
+            Ok(files) => {
+                info!("Extracted {} files to {}", files.len(), install_dir);
+                state.progress_pct.store(100, std::sync::atomic::Ordering::Relaxed);
+            }
+            Err(e) => {
+                if let Ok(mut err) = state.install_error.lock() {
+                    *err = Some(format!("Extraction failed: {}", e));
+                }
+            }
+        }
+
+        state.install_complete.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
 }
 
 unsafe fn paint_sidebar(hwnd: HWND, d: &WizardData) {

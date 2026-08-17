@@ -15,16 +15,28 @@ pub struct InstallWizardResult {
     pub cancelled: bool,
     pub launch_after: bool,
     pub selected_components: Vec<String>,
+    /// Whether the wizard already completed file extraction (native wizard mode)
+    pub install_completed: bool,
 }
 
 /// Run the installer wizard based on the manifest's UI configuration.
 pub fn run_install_wizard(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
+    run_install_wizard_with_payload(manifest, None)
+}
+
+/// Run the installer wizard with payload data for in-wizard extraction.
+///
+/// When `payload_data` is provided and the theme is "native"/"modern",
+/// the wizard will perform extraction internally and show real progress.
+pub fn run_install_wizard_with_payload(
+    manifest: &VelocityManifest,
+    payload_data: Option<Vec<u8>>,
+) -> Result<InstallWizardResult> {
     match manifest.ui.theme.as_str() {
         "classic" => run_classic(manifest),
         "modern" | "native" => {
-            // Modern/native themes use the real Win32 wizard window
             tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
-            run_native(manifest)
+            run_native_with_payload(manifest, payload_data)
         }
         _ => Err(UiError::Other(format!(
             "Unknown theme: {}",
@@ -46,12 +58,16 @@ fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         cancelled: false,
         launch_after: result.launch_after,
         selected_components: Vec::new(),
+        install_completed: false,
     })
 }
 
-/// Run the native Win32 wizard and map to InstallWizardResult.
-fn run_native(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    let result = native_wizard::run_native_wizard(manifest)?;
+/// Run the native Win32 wizard with payload data.
+fn run_native_with_payload(
+    manifest: &VelocityManifest,
+    payload_data: Option<Vec<u8>>,
+) -> Result<InstallWizardResult> {
+    let result = native_wizard::run_native_wizard(manifest, payload_data)?;
 
     if result.cancelled {
         return Err(UiError::Cancelled);
@@ -62,6 +78,24 @@ fn run_native(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
         cancelled: false,
         launch_after: result.launch_after,
         selected_components: result.selected_components,
+        install_completed: result.install_completed,
+    })
+}
+
+/// Run the native Win32 wizard and map to InstallWizardResult.
+fn run_native(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
+    let result = native_wizard::run_native_wizard(manifest, None)?;
+
+    if result.cancelled {
+        return Err(UiError::Cancelled);
+    }
+
+    Ok(InstallWizardResult {
+        install_dir: result.install_dir,
+        cancelled: false,
+        launch_after: result.launch_after,
+        selected_components: result.selected_components,
+        install_completed: false,
     })
 }
 
