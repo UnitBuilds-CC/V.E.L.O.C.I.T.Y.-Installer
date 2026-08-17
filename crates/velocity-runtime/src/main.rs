@@ -124,6 +124,18 @@ fn main() -> Result<()> {
     let _log_path = logging::init_temp_logger(&manifest.app.name).ok();
     logging::log(&format!("=== Installing {} v{} ===", manifest.app.name, manifest.app.version));
 
+    // Check for another instance of this installer
+    let _installer_mutex = match velocity_core::installer_mutex::InstallerMutex::try_acquire(&manifest.app.name) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("{}", e);
+            if !args.silent {
+                velocity_ui::classic::show_error("Installer Already Running", &e.to_string());
+            }
+            return Err(e.into());
+        }
+    };
+
     // Step 2: Show the installation wizard (or use defaults in silent mode)
     let wizard_result = if args.silent {
         // Silent mode: use defaults
