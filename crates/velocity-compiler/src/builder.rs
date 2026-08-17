@@ -152,7 +152,8 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         &options.output_path,
     )?;
 
-    // Step 8: Set custom icon if specified
+    // Step 8: Set custom icon if specified (Windows-only — PE icon editing)
+    #[cfg(target_os = "windows")]
     if let Some(ref icon_path) = manifest.app.icon {
         let full_icon_path = options.project_dir.join(icon_path);
         if full_icon_path.exists() {
@@ -168,16 +169,19 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         }
     }
 
-    // Step 9: Set version info
-    let default_desc = format!("{} Installer", manifest.app.name);
-    let description = manifest.app.description.as_deref().unwrap_or(&default_desc);
-    let _ = velocity_core::pe_icon::set_exe_version_info(
-        &options.output_path,
-        &manifest.app.version,
-        Some(&manifest.app.publisher),
-        Some(description),
-        None,
-    );
+    // Step 9: Set version info (Windows-only — PE version resource)
+    #[cfg(target_os = "windows")]
+    {
+        let default_desc = format!("{} Installer", manifest.app.name);
+        let description = manifest.app.description.as_deref().unwrap_or(&default_desc);
+        let _ = velocity_core::pe_icon::set_exe_version_info(
+            &options.output_path,
+            &manifest.app.version,
+            Some(&manifest.app.publisher),
+            Some(description),
+            None,
+        );
+    }
 
     let installer_size = std::fs::metadata(&options.output_path)?.len();
 
