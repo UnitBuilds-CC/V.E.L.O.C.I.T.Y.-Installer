@@ -12,6 +12,10 @@
 //! 9. Shows the completion dialog
 //! 10. On failure, rolls back all changes
 
+// Release builds are GUI apps (no console window).
+// Debug builds keep the console for development output.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use anyhow::Result;
 use tracing::{error, info, warn};
 use velocity_core::logging;

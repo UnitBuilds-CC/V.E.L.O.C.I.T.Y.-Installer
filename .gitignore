@@ -20,3 +20,8 @@ Desktop.ini
 # Environment
 .env
 .env.local
+
+# Code signing certificates (never commit secrets)
+*.pfx
+*.p12
+*.pem
