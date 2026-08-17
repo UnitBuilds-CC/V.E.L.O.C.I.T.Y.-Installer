@@ -9,6 +9,7 @@ pub mod arch_detect;
 pub mod checksum;
 pub mod component_tree;
 pub mod condition;
+pub mod delta;
 pub mod dep_installer;
 pub mod dep_resolver;
 pub mod disk_space;

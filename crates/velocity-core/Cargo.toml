@@ -34,3 +34,6 @@ winreg = { workspace = true }
 # Unix HTTP support
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 ureq = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
