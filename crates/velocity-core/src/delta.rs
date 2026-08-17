@@ -1,13 +1,20 @@
 //! Delta update generation and application for efficient version updates.
 //!
-//! This module implements binary delta patching using Zstd's dictionary training
-//! capabilities. Delta updates allow transferring only the changes between
+//! This module implements binary delta patching using bsdiff for true binary diffing
+//! with Zstd compression on top. Delta updates allow transferring only the changes between
 //! versions, reducing update sizes by 80-95% compared to full packages.
+//!
+//! # Security
+//!
+//! All relative paths in delta packages are validated against path traversal attacks.
+//! Disk space is verified before applying. File locking prevents concurrent corruption.
+//! Rollback uses atomic rename operations for crash safety.
 
 use crate::error::{CoreError, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
@@ -32,7 +39,7 @@ pub struct DeltaPackage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FilePatch {
-    /// File was modified — contains binary patch
+    /// File was modified — contains binary patch or full compressed content
     Modified {
         /// Relative path within the installation
         path: PathBuf,
@@ -40,10 +47,12 @@ pub enum FilePatch {
         old_checksum: String,
         /// SHA256 checksum of the new file
         new_checksum: String,
-        /// Zstd-compressed binary patch (old → new)
+        /// bsdiff patch compressed with Zstd, or full content compressed with Zstd
         patch_data: Vec<u8>,
         /// Size of the new file after patching
         new_size: u64,
+        /// True if patch_data is a bsdiff patch; false if it's full Zstd-compressed content
+        is_bsdiff: bool,
     },
     /// File was added — contains full file content
     Added {
@@ -80,11 +89,16 @@ impl Default for DeltaOptions {
     fn default() -> Self {
         Self {
             compression_level: 9,
-            min_patch_size: 1024,        // 1 KB
+            min_patch_size: 1024,         // 1 KB
             max_file_size: 2_147_483_648, // 2 GB (Zstd limit)
         }
     }
 }
+
+/// Progress callback for delta operations.
+///
+/// Receives `(current_step, total_steps, message)` on each update.
+pub type DeltaProgressFn = Box<dyn Fn(usize, usize, &str) + Send + Sync>;
 
 /// Generate a delta package between two directory trees.
 ///
@@ -92,15 +106,8 @@ impl Default for DeltaOptions {
 /// and including full content for new files. Deleted files are tracked but not
 /// included in the delta.
 ///
-/// # Arguments
-/// * `old_dir` - Path to the old version directory
-/// * `new_dir` - Path to the new version directory
-/// * `from_version` - Version string for the old version
-/// * `to_version` - Version string for the new version
-/// * `options` - Delta generation options
-///
-/// # Returns
-/// A `DeltaPackage` containing all necessary patches to update from old to new
+/// Uses bsdiff for true binary diffing, producing patches that are typically
+/// 80-95% smaller than full file replacements.
 pub fn generate_delta(
     old_dir: &Path,
     new_dir: &Path,
@@ -116,7 +123,6 @@ pub fn generate_delta(
         to_version
     );
 
-    // Collect all files from both directories
     let old_files = collect_files(old_dir)?;
     let new_files = collect_files(new_dir)?;
 
@@ -133,40 +139,44 @@ pub fn generate_delta(
             let old_content = fs::read(old_path)?;
             let new_content = fs::read(new_path)?;
 
-            let old_checksum = crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
-            let new_checksum = crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
+            let old_checksum =
+                crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
+            let new_checksum =
+                crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
 
             if old_checksum == new_checksum {
                 debug!("Unchanged: {}", rel_path.display());
-                continue; // File unchanged, skip
+                continue;
             }
 
-            // File modified — generate patch
+            // File modified — generate bsdiff patch
             let new_size = new_content.len() as u64;
 
-            // Decide whether to patch or include full content
             let patch_data = if new_content.len() as u64 >= options.min_patch_size
                 && new_content.len() as u64 <= options.max_file_size
             {
-                // Generate binary patch
-                match generate_zstd_patch(&old_content, &new_content, options.compression_level) {
+                match generate_bsdiff_patch(&old_content, &new_content, options.compression_level) {
                     Ok(patch) => {
                         // Only use patch if it's smaller than full content
                         if patch.len() < new_content.len() {
                             debug!(
-                                "Patched: {} ({} -> {} bytes)",
+                                "Patched: {} ({} -> {} bytes, {:.1}% reduction)",
                                 rel_path.display(),
                                 patch.len(),
-                                new_content.len()
+                                new_content.len(),
+                                (1.0 - patch.len() as f64 / new_content.len() as f64) * 100.0
                             );
-                            patch
+                            (patch, true) // bsdiff patch
                         } else {
                             debug!(
                                 "Full content (patch larger): {} ({} bytes)",
                                 rel_path.display(),
                                 new_content.len()
                             );
-                            compress_with_zstd(&new_content, options.compression_level)?
+                            (
+                                compress_with_zstd(&new_content, options.compression_level)?,
+                                false,
+                            )
                         }
                     }
                     Err(e) => {
@@ -175,7 +185,10 @@ pub fn generate_delta(
                             rel_path.display(),
                             e
                         );
-                        compress_with_zstd(&new_content, options.compression_level)?
+                        (
+                            compress_with_zstd(&new_content, options.compression_level)?,
+                            false,
+                        )
                     }
                 }
             } else {
@@ -186,9 +199,13 @@ pub fn generate_delta(
                     rel_path.display(),
                     new_content.len()
                 );
-                compress_with_zstd(&new_content, options.compression_level)?
+                (
+                    compress_with_zstd(&new_content, options.compression_level)?,
+                    false,
+                )
             };
 
+            let (patch_data, is_bsdiff) = patch_data;
             total_patch_size += patch_data.len() as u64;
             patches.push(FilePatch::Modified {
                 path: rel_path.clone(),
@@ -196,11 +213,13 @@ pub fn generate_delta(
                 new_checksum,
                 patch_data,
                 new_size,
+                is_bsdiff,
             });
         } else {
             // New file — include full content
             let new_content = fs::read(new_path)?;
-            let checksum = crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
+            let checksum =
+                crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
             let size = new_content.len() as u64;
             let content = compress_with_zstd(&new_content, options.compression_level)?;
 
@@ -219,7 +238,8 @@ pub fn generate_delta(
         if !new_files.contains_key(rel_path) {
             let old_path = old_dir.join(rel_path);
             let old_content = fs::read(&old_path)?;
-            let checksum = crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
+            let checksum =
+                crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
 
             patches.push(FilePatch::Deleted {
                 path: rel_path.clone(),
@@ -245,13 +265,29 @@ pub fn generate_delta(
 
 /// Apply a delta package to a directory, reconstructing the new version.
 ///
-/// # Arguments
-/// * `delta` - The delta package to apply
-/// * `target_dir` - Directory to update (must contain the old version)
+/// # Security
 ///
-/// # Returns
-/// Result indicating success or failure
+/// - Validates all paths against traversal attacks
+/// - Checks available disk space before applying
+/// - Uses file locking to prevent concurrent updates
+/// - Creates atomic backup for rollback on failure
+/// - Verifies SHA256 checksums before and after patching
 pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
+    apply_delta_with_progress(delta, target_dir, None)
+}
+
+/// Apply a delta package with progress reporting.
+pub fn apply_delta_with_progress(
+    delta: &DeltaPackage,
+    target_dir: &Path,
+    progress: Option<DeltaProgressFn>,
+) -> Result<()> {
+    let report = |step: usize, total: usize, msg: &str| {
+        if let Some(ref cb) = progress {
+            cb(step, total, msg);
+        }
+    };
+
     info!(
         "Applying delta: {} -> {} to {}",
         delta.from_version,
@@ -259,18 +295,82 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
         target_dir.display()
     );
 
-    // Create backup for rollback
+    let total_steps = delta.patches.len() + 3; // validate + backup + patches + cleanup
+
+    // Step 1: Validate all paths against traversal attacks
+    report(0, total_steps, "Validating paths...");
+    for patch in &delta.patches {
+        let path = match patch {
+            FilePatch::Modified { path, .. } => path,
+            FilePatch::Added { path, .. } => path,
+            FilePatch::Deleted { path, .. } => path,
+        };
+        validate_patch_path(path)?;
+    }
+    debug!("Path validation passed for {} patches", delta.patches.len());
+
+    // Step 2: Acquire exclusive file lock (placed as sibling to target_dir)
+    report(1, total_steps, "Acquiring lock...");
+    let lock_path = if let Some(parent) = target_dir.parent() {
+        parent.join(format!(
+            ".velocity-update-{}.lock",
+            target_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "install".to_string())
+        ))
+    } else {
+        target_dir.with_extension("lock")
+    };
+    let lock_file = File::create(&lock_path)
+        .map_err(|e| CoreError::Other(format!("Failed to create lock file: {}", e)))?;
+    lock_file.try_lock_exclusive().map_err(|_| {
+        CoreError::Other("Another update process is already running (lock file held)".to_string())
+    })?;
+    debug!("Acquired exclusive update lock");
+
+    // Ensure lock is released when we exit (success or failure).
+    // The File is dropped at function exit, releasing the lock automatically.
+
+    // Step 3: Check disk space (need ~2x install size for backup + patches)
+    report(1, total_steps, "Checking disk space...");
+    let install_size = dir_size(target_dir)?;
+    let required_space = install_size * 2 + delta.total_patch_size;
+    check_disk_space(target_dir, required_space)?;
+    debug!(
+        "Disk space check: need {} bytes, install is {} bytes",
+        required_space, install_size
+    );
+
+    // Step 4: Create backup for rollback (atomic rename-based)
+    report(2, total_steps, "Creating backup...");
     let backup_dir = target_dir.with_extension("backup");
     if backup_dir.exists() {
         fs::remove_dir_all(&backup_dir)?;
     }
 
-    // Copy current state to backup
-    copy_dir_recursive(target_dir, &backup_dir)?;
+    // Atomic rename: target -> backup (instant, crash-safe)
+    fs::rename(target_dir, &backup_dir).map_err(|e| {
+        CoreError::Other(format!(
+            "Failed to create atomic backup (rename {} -> {}): {}",
+            target_dir.display(),
+            backup_dir.display(),
+            e
+        ))
+    })?;
 
-    // Apply patches
+    // Recreate target dir from backup (copy for the working set)
+    copy_dir_recursive(&backup_dir, target_dir)?;
+
+    // Step 5: Apply patches
     let mut applied = Vec::new();
-    for patch in &delta.patches {
+    for (i, patch) in delta.patches.iter().enumerate() {
+        report(
+            3 + i,
+            total_steps,
+            &format!("Applying patch {}/{}...", i + 1, delta.patches.len()),
+        );
+
         match patch {
             FilePatch::Modified {
                 path,
@@ -278,13 +378,13 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                 new_checksum,
                 patch_data,
                 new_size,
+                is_bsdiff,
             } => {
                 let file_path = target_dir.join(path);
 
-                // Verify old file exists and checksum matches
                 if !file_path.exists() {
                     warn!("File not found for patch: {}", path.display());
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "File not found for patch: {}",
                         path.display()
@@ -292,7 +392,10 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                 }
 
                 let old_content = fs::read(&file_path)?;
-                let actual_checksum = crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
+                let actual_checksum = crate::checksum::hash_bytes(
+                    &old_content,
+                    crate::checksum::HashAlgorithm::Sha256,
+                );
 
                 if actual_checksum != *old_checksum {
                     warn!(
@@ -301,18 +404,25 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                         old_checksum,
                         actual_checksum
                     );
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "Checksum mismatch for {}",
                         path.display()
                     )));
                 }
 
-                // Apply patch
-                let new_content = apply_zstd_patch(&old_content, patch_data)?;
+                // Apply patch: bsdiff or full content depending on how it was generated
+                let new_content = if *is_bsdiff {
+                    apply_bsdiff_patch(&old_content, patch_data)?
+                } else {
+                    decompress_with_zstd(patch_data)?
+                };
 
                 // Verify new checksum
-                let actual_new_checksum = crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
+                let actual_new_checksum = crate::checksum::hash_bytes(
+                    &new_content,
+                    crate::checksum::HashAlgorithm::Sha256,
+                );
                 if actual_new_checksum != *new_checksum {
                     warn!(
                         "New checksum mismatch for {}: expected {}, got {}",
@@ -320,7 +430,7 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                         new_checksum,
                         actual_new_checksum
                     );
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "New checksum mismatch for {}",
                         path.display()
@@ -335,14 +445,13 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                         new_size,
                         new_content.len()
                     );
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "Size mismatch for {}",
                         path.display()
                     )));
                 }
 
-                // Write new content
                 fs::write(&file_path, &new_content)?;
                 applied.push(path.clone());
                 debug!("Applied patch: {}", path.display());
@@ -355,11 +464,12 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
             } => {
                 let file_path = target_dir.join(path);
 
-                // Decompress content
                 let new_content = decompress_with_zstd(content)?;
 
-                // Verify checksum
-                let actual_checksum = crate::checksum::hash_bytes(&new_content, crate::checksum::HashAlgorithm::Sha256);
+                let actual_checksum = crate::checksum::hash_bytes(
+                    &new_content,
+                    crate::checksum::HashAlgorithm::Sha256,
+                );
                 if actual_checksum != *checksum {
                     warn!(
                         "Checksum mismatch for new file {}: expected {}, got {}",
@@ -367,14 +477,13 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                         checksum,
                         actual_checksum
                     );
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "Checksum mismatch for new file {}",
                         path.display()
                     )));
                 }
 
-                // Verify size
                 if new_content.len() as u64 != *size {
                     warn!(
                         "Size mismatch for new file {}: expected {}, got {}",
@@ -382,19 +491,17 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                         size,
                         new_content.len()
                     );
-                    rollback(target_dir, &backup_dir)?;
+                    rollback_atomic(target_dir, &backup_dir)?;
                     return Err(CoreError::Other(format!(
                         "Size mismatch for new file {}",
                         path.display()
                     )));
                 }
 
-                // Create parent directories
                 if let Some(parent) = file_path.parent() {
                     fs::create_dir_all(parent)?;
                 }
 
-                // Write file
                 fs::write(&file_path, &new_content)?;
                 applied.push(path.clone());
                 debug!("Added file: {}", path.display());
@@ -403,9 +510,11 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                 let file_path = target_dir.join(path);
 
                 if file_path.exists() {
-                    // Verify checksum before deletion
                     let old_content = fs::read(&file_path)?;
-                    let actual_checksum = crate::checksum::hash_bytes(&old_content, crate::checksum::HashAlgorithm::Sha256);
+                    let actual_checksum = crate::checksum::hash_bytes(
+                        &old_content,
+                        crate::checksum::HashAlgorithm::Sha256,
+                    );
 
                     if actual_checksum != *checksum {
                         warn!(
@@ -414,7 +523,7 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
                             checksum,
                             actual_checksum
                         );
-                        rollback(target_dir, &backup_dir)?;
+                        rollback_atomic(target_dir, &backup_dir)?;
                         return Err(CoreError::Other(format!(
                             "Checksum mismatch for deletion {}",
                             path.display()
@@ -429,8 +538,13 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
         }
     }
 
-    // Success — remove backup
+    // Success — remove backup atomically
+    report(total_steps, total_steps, "Cleaning up...");
     fs::remove_dir_all(&backup_dir)?;
+
+    // Release lock and remove lock file
+    let _ = lock_file.unlock();
+    let _ = fs::remove_file(&lock_path);
 
     info!(
         "Delta applied successfully: {} files updated",
@@ -441,18 +555,11 @@ pub fn apply_delta(delta: &DeltaPackage, target_dir: &Path) -> Result<()> {
 }
 
 /// Save a delta package to a .delta.zip file.
-///
-/// The delta package is serialized as JSON and compressed with Zstd.
 pub fn save_delta_package(delta: &DeltaPackage, path: &Path) -> Result<()> {
     info!("Saving delta package to {}", path.display());
 
-    // Serialize to JSON
     let json = serde_json::to_string(delta).map_err(|e| CoreError::Other(e.to_string()))?;
-
-    // Compress with Zstd
     let compressed = compress_with_zstd(json.as_bytes(), 9)?;
-
-    // Write to file
     fs::write(path, &compressed)?;
 
     info!(
@@ -468,14 +575,10 @@ pub fn save_delta_package(delta: &DeltaPackage, path: &Path) -> Result<()> {
 pub fn load_delta_package(path: &Path) -> Result<DeltaPackage> {
     info!("Loading delta package from {}", path.display());
 
-    // Read compressed file
     let compressed = fs::read(path)?;
-
-    // Decompress with Zstd
     let json_bytes = decompress_with_zstd(&compressed)?;
-
-    // Deserialize from JSON
-    let delta: DeltaPackage = serde_json::from_slice(&json_bytes).map_err(|e| CoreError::Other(e.to_string()))?;
+    let delta: DeltaPackage =
+        serde_json::from_slice(&json_bytes).map_err(|e| CoreError::Other(e.to_string()))?;
 
     info!(
         "Delta package loaded: {} -> {}, {} patches",
@@ -489,18 +592,28 @@ pub fn load_delta_package(path: &Path) -> Result<DeltaPackage> {
 
 /// Apply multiple delta packages in sequence (multi-hop update).
 ///
-/// This allows updating across multiple versions in a single operation.
-/// For example: v1.0.0 → v1.0.1 → v1.0.2 → v1.0.3
-///
-/// # Arguments
-/// * `deltas` - List of delta packages to apply in order
-/// * `target_dir` - Directory to update
-///
-/// # Returns
-/// Result indicating success or failure
+/// Verifies chain continuity before applying. Falls back to full download
+/// if the chain exceeds 5 hops.
 pub fn apply_delta_chain(deltas: &[DeltaPackage], target_dir: &Path) -> Result<()> {
+    apply_delta_chain_with_progress(deltas, target_dir, None)
+}
+
+/// Apply multiple delta packages with progress reporting.
+pub fn apply_delta_chain_with_progress(
+    deltas: &[DeltaPackage],
+    target_dir: &Path,
+    progress: Option<DeltaProgressFn>,
+) -> Result<()> {
     if deltas.is_empty() {
         return Ok(());
+    }
+
+    // Enforce max hop limit
+    if deltas.len() > 5 {
+        return Err(CoreError::Other(format!(
+            "Delta chain too long: {} hops (max 5). Use full download instead.",
+            deltas.len()
+        )));
     }
 
     info!(
@@ -532,6 +645,15 @@ pub fn apply_delta_chain(deltas: &[DeltaPackage], target_dir: &Path) -> Result<(
             delta.from_version,
             delta.to_version
         );
+
+        if let Some(ref cb) = progress {
+            cb(
+                i + 1,
+                deltas.len(),
+                &format!("Applying hop {}/{}", i + 1, deltas.len()),
+            );
+        }
+
         apply_delta(delta, target_dir)?;
     }
 
@@ -544,23 +666,83 @@ pub fn apply_delta_chain(deltas: &[DeltaPackage], target_dir: &Path) -> Result<(
     Ok(())
 }
 
-/// Rollback to backup directory on failure.
-fn rollback(target_dir: &Path, backup_dir: &Path) -> Result<()> {
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Atomic rollback: rename failed target away, restore backup, clean up.
+///
+/// This is crash-safe because `rename` is atomic on both Windows and Unix.
+/// If the process crashes mid-rollback, either the old or new directory
+/// will be intact.
+fn rollback_atomic(target_dir: &Path, backup_dir: &Path) -> Result<()> {
     warn!("Rolling back to backup...");
 
-    if backup_dir.exists() {
-        // Remove failed update
-        if target_dir.exists() {
-            fs::remove_dir_all(target_dir)?;
-        }
-
-        // Restore backup
-        copy_dir_recursive(backup_dir, target_dir)?;
-        fs::remove_dir_all(backup_dir)?;
-
-        info!("Rollback complete");
+    if !backup_dir.exists() {
+        warn!("No backup directory found — cannot rollback");
+        return Err(CoreError::Other("Rollback failed: no backup".to_string()));
     }
 
+    // Remove the failed target (if it exists) by renaming it aside first
+    let failed_dir = target_dir.with_extension("failed");
+    if target_dir.exists() {
+        if failed_dir.exists() {
+            let _ = fs::remove_dir_all(&failed_dir);
+        }
+        // Atomic rename: target -> failed
+        if let Err(e) = fs::rename(target_dir, &failed_dir) {
+            warn!("Failed to rename target aside: {}", e);
+            // Try to force remove as fallback
+            let _ = fs::remove_dir_all(target_dir);
+        }
+    }
+
+    // Atomic rename: backup -> target
+    fs::rename(backup_dir, target_dir).map_err(|e| {
+        CoreError::Other(format!(
+            "Critical: failed to restore backup ({} -> {}): {}. Manual recovery needed.",
+            backup_dir.display(),
+            target_dir.display(),
+            e
+        ))
+    })?;
+
+    // Clean up the failed directory
+    if failed_dir.exists() {
+        let _ = fs::remove_dir_all(&failed_dir);
+    }
+
+    info!("Rollback complete");
+    Ok(())
+}
+
+/// Validate a relative path from a delta package for traversal attacks.
+fn validate_patch_path(path: &Path) -> Result<()> {
+    let path_str = path.to_string_lossy();
+    crate::security::validate_relative_path(&path_str)
+}
+
+/// Check that the filesystem containing `path` has at least `required` bytes free.
+fn check_disk_space(path: &Path, required: u64) -> Result<()> {
+    let available = fs2::available_space(path).map_err(|e| {
+        CoreError::Other(format!(
+            "Failed to check disk space for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    if available < required {
+        return Err(CoreError::Other(format!(
+            "Insufficient disk space: need {} bytes, only {} available",
+            required, available
+        )));
+    }
+
+    debug!(
+        "Disk space OK: {} bytes available, {} bytes required",
+        available, required
+    );
     Ok(())
 }
 
@@ -584,21 +766,32 @@ fn collect_files(dir: &Path) -> Result<HashMap<PathBuf, PathBuf>> {
     Ok(files)
 }
 
-/// Generate a Zstd binary patch from old to new content.
-fn generate_zstd_patch(_old: &[u8], new: &[u8], level: i32) -> Result<Vec<u8>> {
-    // Use Zstd's dictionary training for efficient patching
-    // For now, we'll use a simple approach: compress the diff
-    // In a production implementation, we'd use bsdiff or similar
+/// Generate a bsdiff binary patch, compressed with Zstd.
+///
+/// Uses the bsdiff algorithm for true binary diffing, then compresses
+/// the result with Zstd for additional size reduction.
+fn generate_bsdiff_patch(old: &[u8], new: &[u8], level: i32) -> Result<Vec<u8>> {
+    // Generate bsdiff patch (raw binary diff)
+    let mut patch = Vec::new();
+    bsdiff::diff(old, new, &mut patch)
+        .map_err(|e| CoreError::Other(format!("bsdiff failed: {}", e)))?;
 
-    // Simple approach: just compress the new content with Zstd
-    // A more sophisticated approach would use binary diffing
-    compress_with_zstd(new, level)
+    // Compress the patch with Zstd for additional size reduction
+    compress_with_zstd(&patch, level)
 }
 
-/// Apply a Zstd patch to reconstruct new content.
-fn apply_zstd_patch(_old: &[u8], patch_data: &[u8]) -> Result<Vec<u8>> {
-    // Since we're using simple compression for now, just decompress
-    decompress_with_zstd(patch_data)
+/// Apply a bsdiff patch (Zstd-compressed) to reconstruct new content.
+fn apply_bsdiff_patch(old: &[u8], patch_data: &[u8]) -> Result<Vec<u8>> {
+    // Decompress the Zstd wrapper
+    let patch_bytes = decompress_with_zstd(patch_data)?;
+
+    // Apply bsdiff patch (needs &mut Read)
+    let mut cursor = std::io::Cursor::new(patch_bytes);
+    let mut output = Vec::new();
+    bsdiff::patch(old, &mut cursor, &mut output)
+        .map_err(|e| CoreError::Other(format!("bsdiff patch application failed: {}", e)))?;
+
+    Ok(output)
 }
 
 /// Compress data with Zstd.
@@ -619,7 +812,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
 
     for entry in WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
-        let rel_path = entry.path().strip_prefix(src).map_err(|e| CoreError::Other(e.to_string()))?;
+        let rel_path = entry
+            .path()
+            .strip_prefix(src)
+            .map_err(|e| CoreError::Other(e.to_string()))?;
         let dst_path = dst.join(rel_path);
 
         if entry.file_type().is_dir() {
@@ -633,6 +829,21 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Calculate total size of a directory tree.
+fn dir_size(path: &Path) -> Result<u64> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0u64;
+    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
@@ -649,7 +860,6 @@ mod tests {
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&new_dir).unwrap();
 
-        // Create identical files
         fs::write(old_dir.join("file.txt"), "content").unwrap();
         fs::write(new_dir.join("file.txt"), "content").unwrap();
 
@@ -662,7 +872,6 @@ mod tests {
         )
         .unwrap();
 
-        // No patches for unchanged files
         assert_eq!(delta.patches.len(), 0);
     }
 
@@ -675,7 +884,6 @@ mod tests {
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&new_dir).unwrap();
 
-        // Create modified file
         fs::write(old_dir.join("file.txt"), "old content").unwrap();
         fs::write(new_dir.join("file.txt"), "new content").unwrap();
 
@@ -688,7 +896,6 @@ mod tests {
         )
         .unwrap();
 
-        // Should have one modified patch
         assert_eq!(delta.patches.len(), 1);
         match &delta.patches[0] {
             FilePatch::Modified { path, .. } => {
@@ -707,7 +914,6 @@ mod tests {
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&new_dir).unwrap();
 
-        // Create new file
         fs::write(new_dir.join("new.txt"), "new file").unwrap();
 
         let delta = generate_delta(
@@ -719,7 +925,6 @@ mod tests {
         )
         .unwrap();
 
-        // Should have one added patch
         assert_eq!(delta.patches.len(), 1);
         match &delta.patches[0] {
             FilePatch::Added { path, .. } => {
@@ -738,7 +943,6 @@ mod tests {
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&new_dir).unwrap();
 
-        // Create file in old, not in new
         fs::write(old_dir.join("old.txt"), "old file").unwrap();
 
         let delta = generate_delta(
@@ -750,7 +954,6 @@ mod tests {
         )
         .unwrap();
 
-        // Should have one deleted patch
         assert_eq!(delta.patches.len(), 1);
         match &delta.patches[0] {
             FilePatch::Deleted { path, .. } => {
@@ -771,7 +974,6 @@ mod tests {
         fs::create_dir_all(&new_dir).unwrap();
         fs::create_dir_all(&target_dir).unwrap();
 
-        // Create test files
         fs::write(old_dir.join("unchanged.txt"), "same").unwrap();
         fs::write(new_dir.join("unchanged.txt"), "same").unwrap();
         fs::write(old_dir.join("modified.txt"), "old").unwrap();
@@ -779,10 +981,8 @@ mod tests {
         fs::write(new_dir.join("added.txt"), "new file").unwrap();
         fs::write(old_dir.join("deleted.txt"), "old file").unwrap();
 
-        // Copy old to target
         copy_dir_recursive(&old_dir, &target_dir).unwrap();
 
-        // Generate delta
         let delta = generate_delta(
             &old_dir,
             &new_dir,
@@ -792,10 +992,8 @@ mod tests {
         )
         .unwrap();
 
-        // Apply delta
         apply_delta(&delta, &target_dir).unwrap();
 
-        // Verify target matches new
         assert_eq!(
             fs::read_to_string(target_dir.join("unchanged.txt")).unwrap(),
             "same"
@@ -821,11 +1019,9 @@ mod tests {
         fs::create_dir_all(&old_dir).unwrap();
         fs::create_dir_all(&new_dir).unwrap();
 
-        // Create test files
         fs::write(old_dir.join("file.txt"), "old content").unwrap();
         fs::write(new_dir.join("file.txt"), "new content").unwrap();
 
-        // Generate delta
         let delta = generate_delta(
             &old_dir,
             &new_dir,
@@ -835,16 +1031,10 @@ mod tests {
         )
         .unwrap();
 
-        // Save delta
         save_delta_package(&delta, &delta_path).unwrap();
-
-        // Verify file exists
         assert!(delta_path.exists());
 
-        // Load delta
         let loaded = load_delta_package(&delta_path).unwrap();
-
-        // Verify loaded delta matches original
         assert_eq!(loaded.from_version, "1.0.0");
         assert_eq!(loaded.to_version, "1.0.1");
         assert_eq!(loaded.patches.len(), delta.patches.len());
@@ -863,46 +1053,26 @@ mod tests {
         fs::create_dir_all(&v3_dir).unwrap();
         fs::create_dir_all(&target_dir).unwrap();
 
-        // Create v1 files
         fs::write(v1_dir.join("file.txt"), "version 1").unwrap();
         fs::write(v1_dir.join("unchanged.txt"), "same").unwrap();
 
-        // Create v2 files (modified file.txt)
         fs::write(v2_dir.join("file.txt"), "version 2").unwrap();
         fs::write(v2_dir.join("unchanged.txt"), "same").unwrap();
 
-        // Create v3 files (modified file.txt again, added new.txt)
         fs::write(v3_dir.join("file.txt"), "version 3").unwrap();
         fs::write(v3_dir.join("unchanged.txt"), "same").unwrap();
         fs::write(v3_dir.join("new.txt"), "new in v3").unwrap();
 
-        // Copy v1 to target
         copy_dir_recursive(&v1_dir, &target_dir).unwrap();
 
-        // Generate delta v1 -> v2
-        let delta1 = generate_delta(
-            &v1_dir,
-            &v2_dir,
-            "1.0.0",
-            "1.0.1",
-            &DeltaOptions::default(),
-        )
-        .unwrap();
+        let delta1 =
+            generate_delta(&v1_dir, &v2_dir, "1.0.0", "1.0.1", &DeltaOptions::default()).unwrap();
 
-        // Generate delta v2 -> v3
-        let delta2 = generate_delta(
-            &v2_dir,
-            &v3_dir,
-            "1.0.1",
-            "1.0.2",
-            &DeltaOptions::default(),
-        )
-        .unwrap();
+        let delta2 =
+            generate_delta(&v2_dir, &v3_dir, "1.0.1", "1.0.2", &DeltaOptions::default()).unwrap();
 
-        // Apply delta chain
         apply_delta_chain(&[delta1, delta2], &target_dir).unwrap();
 
-        // Verify target matches v3
         assert_eq!(
             fs::read_to_string(target_dir.join("file.txt")).unwrap(),
             "version 3"
@@ -915,5 +1085,259 @@ mod tests {
             fs::read_to_string(target_dir.join("new.txt")).unwrap(),
             "new in v3"
         );
+    }
+
+    // --- New production hardening tests ---
+
+    #[test]
+    fn test_delta_binary_roundtrip() {
+        // Test with real binary data (not just text)
+        let temp = TempDir::new().unwrap();
+        let old_dir = temp.path().join("old");
+        let new_dir = temp.path().join("new");
+        let target_dir = temp.path().join("target");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        // Create binary files with known patterns
+        let old_binary: Vec<u8> = (0..4096).map(|i| (i % 256) as u8).collect();
+        let new_binary: Vec<u8> = (0..4096)
+            .map(|i| {
+                if i % 100 < 10 {
+                    (i % 256) as u8 ^ 0xFF
+                } else {
+                    (i % 256) as u8
+                }
+            })
+            .collect();
+
+        fs::write(old_dir.join("binary.bin"), &old_binary).unwrap();
+        fs::write(new_dir.join("binary.bin"), &new_binary).unwrap();
+
+        copy_dir_recursive(&old_dir, &target_dir).unwrap();
+
+        let delta = generate_delta(
+            &old_dir,
+            &new_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Verify bsdiff produced a smaller patch than full content
+        match &delta.patches[0] {
+            FilePatch::Modified {
+                patch_data,
+                new_size,
+                is_bsdiff,
+                ..
+            } => {
+                assert!(is_bsdiff, "Expected bsdiff patch for 4KB binary file");
+                assert!(
+                    patch_data.len() < *new_size as usize,
+                    "bsdiff patch ({} bytes) should be smaller than full file ({} bytes)",
+                    patch_data.len(),
+                    new_size
+                );
+            }
+            _ => panic!("Expected Modified patch"),
+        }
+
+        apply_delta(&delta, &target_dir).unwrap();
+
+        let result = fs::read(target_dir.join("binary.bin")).unwrap();
+        assert_eq!(result, new_binary);
+    }
+
+    #[test]
+    fn test_path_traversal_rejected() {
+        let delta = DeltaPackage {
+            from_version: "1.0.0".to_string(),
+            to_version: "1.0.1".to_string(),
+            patches: vec![FilePatch::Added {
+                path: PathBuf::from("../../evil.txt"),
+                checksum: "abc".to_string(),
+                content: vec![],
+                size: 0,
+            }],
+            total_patch_size: 0,
+            created_at: String::new(),
+        };
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path();
+
+        let result = apply_delta(&delta, target);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("traversal")
+                || err.contains("Absolute path")
+                || err.contains("permission"),
+            "Error should mention traversal/permission: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_path_traversal_absolute_rejected() {
+        let delta = DeltaPackage {
+            from_version: "1.0.0".to_string(),
+            to_version: "1.0.1".to_string(),
+            patches: vec![FilePatch::Added {
+                path: PathBuf::from("C:\\Windows\\System32\\evil.dll"),
+                checksum: "abc".to_string(),
+                content: vec![],
+                size: 0,
+            }],
+            total_patch_size: 0,
+            created_at: String::new(),
+        };
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path();
+
+        let result = apply_delta(&delta, target);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delta_chain_too_long() {
+        let make_delta = |from: &str, to: &str| DeltaPackage {
+            from_version: from.to_string(),
+            to_version: to.to_string(),
+            patches: vec![],
+            total_patch_size: 0,
+            created_at: String::new(),
+        };
+
+        let chain: Vec<DeltaPackage> = (0..6)
+            .map(|i| make_delta(&format!("1.0.{}", i), &format!("1.0.{}", i + 1)))
+            .collect();
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path();
+
+        let result = apply_delta_chain(&chain, target);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too long"));
+    }
+
+    #[test]
+    fn test_delta_chain_broken() {
+        let make_delta = |from: &str, to: &str| DeltaPackage {
+            from_version: from.to_string(),
+            to_version: to.to_string(),
+            patches: vec![],
+            total_patch_size: 0,
+            created_at: String::new(),
+        };
+
+        let chain = vec![
+            make_delta("1.0.0", "1.0.1"),
+            make_delta("1.0.5", "1.0.6"), // Gap: 1.0.1 != 1.0.5
+        ];
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path();
+
+        let result = apply_delta_chain(&chain, target);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("broken"));
+    }
+
+    #[test]
+    fn test_progress_callback_called() {
+        use std::sync::{Arc, Mutex};
+
+        let temp = TempDir::new().unwrap();
+        let old_dir = temp.path().join("old");
+        let new_dir = temp.path().join("new");
+        let target_dir = temp.path().join("target");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        fs::write(old_dir.join("file.txt"), "old").unwrap();
+        fs::write(new_dir.join("file.txt"), "new").unwrap();
+
+        copy_dir_recursive(&old_dir, &target_dir).unwrap();
+
+        let delta = generate_delta(
+            &old_dir,
+            &new_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let messages_clone = messages.clone();
+
+        let progress: DeltaProgressFn = Box::new(move |step, total, msg| {
+            messages_clone
+                .lock()
+                .unwrap()
+                .push(format!("{}/{}: {}", step, total, msg));
+        });
+
+        apply_delta_with_progress(&delta, &target_dir, Some(progress)).unwrap();
+
+        let msgs = messages.lock().unwrap();
+        assert!(
+            !msgs.is_empty(),
+            "Progress callback should have been called"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_update_blocked() {
+        let temp = TempDir::new().unwrap();
+        let old_dir = temp.path().join("old");
+        let new_dir = temp.path().join("new");
+        let target_dir = temp.path().join("target");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        fs::write(old_dir.join("file.txt"), "old").unwrap();
+        fs::write(new_dir.join("file.txt"), "new").unwrap();
+
+        copy_dir_recursive(&old_dir, &target_dir).unwrap();
+
+        let delta = generate_delta(
+            &old_dir,
+            &new_dir,
+            "1.0.0",
+            "1.0.1",
+            &DeltaOptions::default(),
+        )
+        .unwrap();
+
+        // Acquire the lock manually (lock is sibling to target_dir)
+        let lock_path = target_dir.parent().unwrap().join(format!(
+            ".velocity-update-{}.lock",
+            target_dir.file_name().unwrap().to_string_lossy()
+        ));
+        let lock_file = File::create(&lock_path).unwrap();
+        lock_file.lock_exclusive().unwrap();
+
+        // Try to apply delta — should fail because lock is held
+        let result = apply_delta(&delta, &target_dir);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("lock"));
+
+        // Release lock
+        lock_file.unlock().unwrap();
+        let _ = fs::remove_file(&lock_path);
+
+        // Now it should succeed
+        apply_delta(&delta, &target_dir).unwrap();
     }
 }

@@ -19,5 +19,9 @@ tracing = { workspace = true }
 walkdir = { workspace = true }
 sha2 = { workspace = true }
 msi = { workspace = true }
+cab = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

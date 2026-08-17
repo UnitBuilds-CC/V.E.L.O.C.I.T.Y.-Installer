@@ -31,12 +31,18 @@ pub fn run(
     // Load config to get compression settings and version info
     let config_path = project_dir.join("velocity.toml");
     let (format, level, current_version) = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path).context("Failed to read velocity.toml")?;
-        let manifest: velocity_config::VelocityManifest = toml::from_str(&content).context("Failed to parse velocity.toml")?;
-        
+        let content =
+            std::fs::read_to_string(&config_path).context("Failed to read velocity.toml")?;
+        let manifest: velocity_config::VelocityManifest =
+            toml::from_str(&content).context("Failed to parse velocity.toml")?;
+
         // CLI flags override config
         let format = compression_format.unwrap_or(manifest.files.compression.format);
-        let level = if compression != 3 { compression } else { manifest.files.compression.level };
+        let level = if compression != 3 {
+            compression
+        } else {
+            manifest.files.compression.level
+        };
         let version = manifest.app.version.clone();
         (format, level, version)
     } else {
@@ -52,11 +58,7 @@ pub fn run(
         } else {
             println!("  Building Velocity installer...");
         }
-        println!(
-            "  Compression: {} (level {})",
-            format,
-            level.clamp(0, 22)
-        );
+        println!("  Compression: {} (level {})", format, level.clamp(0, 22));
         if delta {
             println!("  Delta updates: enabled");
         }
@@ -126,7 +128,7 @@ fn generate_delta_update(
 
     // Look for previous version in output directory
     let output_dir = output_path.parent().unwrap_or(project_dir);
-    
+
     // Find the most recent previous installer
     let mut previous_installers: Vec<_> = std::fs::read_dir(output_dir)
         .context("Failed to read output directory")?
@@ -146,7 +148,9 @@ fn generate_delta_update(
         if !quiet {
             println!();
             println!("  Delta: No previous version found in output directory");
-            println!("         Delta generation requires a previous installer in the same directory");
+            println!(
+                "         Delta generation requires a previous installer in the same directory"
+            );
         }
         return Ok(());
     }
@@ -159,7 +163,7 @@ fn generate_delta_update(
     });
 
     let previous_installer = previous_installers[0].path();
-    
+
     if !quiet {
         println!();
         println!("  Generating delta update...");
@@ -222,14 +226,15 @@ fn generate_delta_update(
             format_size(delta.total_patch_size),
             delta.patches.len()
         );
-        
+
         // Calculate size reduction
-        let current_size = std::fs::metadata(output_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let current_size = std::fs::metadata(output_path).map(|m| m.len()).unwrap_or(0);
         if current_size > 0 {
             let reduction = (1.0 - delta.total_patch_size as f64 / current_size as f64) * 100.0;
-            println!("    Reduction:  {:.1}% smaller than full package", reduction);
+            println!(
+                "    Reduction:  {:.1}% smaller than full package",
+                reduction
+            );
         }
     }
 
@@ -237,13 +242,16 @@ fn generate_delta_update(
 }
 
 /// Extract the payload from an installer to a directory.
-fn extract_installer_payload(installer_path: &std::path::Path, extract_dir: &std::path::Path) -> Result<()> {
+fn extract_installer_payload(
+    installer_path: &std::path::Path,
+    extract_dir: &std::path::Path,
+) -> Result<()> {
     std::fs::create_dir_all(extract_dir)?;
 
     // For delta generation, we need to extract the files
     // This is a simplified placeholder - in production, we'd parse the installer format
     // and extract the actual payload files
-    
+
     // Create a marker file to indicate extraction
     std::fs::write(
         extract_dir.join(".extracted"),
@@ -261,7 +269,8 @@ fn build_msi_package(
     quiet: bool,
 ) -> Result<()> {
     let manifest: velocity_config::VelocityManifest = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path).context("Failed to read velocity.toml")?;
+        let content =
+            std::fs::read_to_string(config_path).context("Failed to read velocity.toml")?;
         toml::from_str(&content).context("Failed to parse velocity.toml")?
     } else {
         anyhow::bail!("velocity.toml not found — MSI builds require a configuration file");
@@ -273,13 +282,15 @@ fn build_msi_package(
         architecture: manifest.install.arch.clone(),
         language: 1033,
         per_machine: manifest.install.require_admin,
-        upgrade_code: manifest.app.id.as_ref().map(|_id: &String| {
-            uuid::Uuid::new_v4().to_string()
-        }),
+        upgrade_code: manifest
+            .app
+            .id
+            .as_ref()
+            .map(|_id: &String| uuid::Uuid::new_v4().to_string()),
     };
 
-    let result = velocity_compiler::build_msi(&manifest, &msi_options)
-        .context("MSI build failed")?;
+    let result =
+        velocity_compiler::build_msi(&manifest, &msi_options).context("MSI build failed")?;
 
     if !quiet {
         println!();

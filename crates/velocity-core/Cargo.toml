@@ -13,10 +13,12 @@ serde_json = { workspace = true }
 zstd = { workspace = true }
 tar = { workspace = true }
 lzma-rs = { workspace = true }
+bsdiff = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
+fs2 = { workspace = true }
 sha2 = { workspace = true }
 hmac = { workspace = true }
 pbkdf2 = { workspace = true }

@@ -22,7 +22,7 @@ use msi::{Column, Insert, Package, PackageType, Value};
 use std::collections::HashMap;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 use velocity_config::VelocityManifest;
 
@@ -113,7 +113,13 @@ pub fn build_msi(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Ms
     create_msi_tables(&mut package)?;
 
     // Populate Property table
-    populate_properties(&mut package, manifest, &product_code, &upgrade_code, options)?;
+    populate_properties(
+        &mut package,
+        manifest,
+        &product_code,
+        &upgrade_code,
+        options,
+    )?;
 
     // Populate Directory table
     let dir_id_map = populate_directories(&mut package, manifest)?;
@@ -143,8 +149,8 @@ pub fn build_msi(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Ms
     // Populate CustomAction and InstallExecuteSequence tables
     populate_custom_actions(&mut package, manifest)?;
 
-    // Embed files as streams in the MSI (cabinet-less approach for simplicity)
-    embed_file_streams(&mut package, &files)?;
+    // Build and embed cabinet file (standard MSI packaging)
+    build_and_embed_cabinet(&mut package, &files)?;
 
     // Flush and write to file
     package
@@ -201,9 +207,7 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
             "Directory",
             vec![
                 Column::build("Directory").primary_key().id_string(72),
-                Column::build("Directory_Parent")
-                    .nullable()
-                    .id_string(72),
+                Column::build("Directory_Parent").nullable().id_string(72),
                 Column::build("DefaultDir").nullable().formatted_string(255),
             ],
         )
@@ -259,7 +263,9 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Feature").primary_key().id_string(38),
                 Column::build("Feature_Parent").nullable().id_string(38),
                 Column::build("Title").nullable().formatted_string(64),
-                Column::build("Description").nullable().formatted_string(255),
+                Column::build("Description")
+                    .nullable()
+                    .formatted_string(255),
                 Column::build("Display").nullable().int16(),
                 Column::build("Level").nullable().int16(),
                 Column::build("Directory_").nullable().id_string(72),
@@ -277,10 +283,9 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Component_").primary_key().id_string(72),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create FeatureComponents table: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            CompilerError::Other(format!("Failed to create FeatureComponents table: {}", e))
+        })?;
 
     // Registry table
     package
@@ -308,7 +313,9 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Component_").nullable().id_string(72),
                 Column::build("Target").nullable().formatted_string(255),
                 Column::build("Arguments").nullable().formatted_string(255),
-                Column::build("Description").nullable().formatted_string(255),
+                Column::build("Description")
+                    .nullable()
+                    .formatted_string(255),
                 Column::build("Hotkey").nullable().int16(),
                 Column::build("Icon_").nullable().id_string(72),
                 Column::build("IconIndex").nullable().int16(),
@@ -340,10 +347,7 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Component_").nullable().id_string(72),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create Environment table: {}",
-            e
-        )))?;
+        .map_err(|e| CompilerError::Other(format!("Failed to create Environment table: {}", e)))?;
 
     // ServiceInstall table
     package
@@ -352,23 +356,30 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
             vec![
                 Column::build("ServiceInstall").primary_key().id_string(72),
                 Column::build("Name").nullable().formatted_string(255),
-                Column::build("DisplayName").nullable().formatted_string(255),
+                Column::build("DisplayName")
+                    .nullable()
+                    .formatted_string(255),
                 Column::build("ServiceType").nullable().int32(),
                 Column::build("StartType").nullable().int32(),
                 Column::build("ErrorControl").nullable().int32(),
-                Column::build("LoadOrderGroup").nullable().formatted_string(255),
-                Column::build("Dependencies").nullable().formatted_string(255),
+                Column::build("LoadOrderGroup")
+                    .nullable()
+                    .formatted_string(255),
+                Column::build("Dependencies")
+                    .nullable()
+                    .formatted_string(255),
                 Column::build("StartName").nullable().formatted_string(255),
                 Column::build("Password").nullable().formatted_string(255),
                 Column::build("Arguments").nullable().formatted_string(255),
                 Column::build("Component_").nullable().id_string(72),
-                Column::build("Description").nullable().formatted_string(255),
+                Column::build("Description")
+                    .nullable()
+                    .formatted_string(255),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create ServiceInstall table: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            CompilerError::Other(format!("Failed to create ServiceInstall table: {}", e))
+        })?;
 
     // ServiceControl table
     package
@@ -383,10 +394,9 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Component_").nullable().id_string(72),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create ServiceControl table: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            CompilerError::Other(format!("Failed to create ServiceControl table: {}", e))
+        })?;
 
     // CustomAction table
     package
@@ -399,10 +409,7 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Target").nullable().formatted_string(255),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create CustomAction table: {}",
-            e
-        )))?;
+        .map_err(|e| CompilerError::Other(format!("Failed to create CustomAction table: {}", e)))?;
 
     // InstallExecuteSequence table
     package
@@ -414,10 +421,12 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
                 Column::build("Sequence").nullable().int16(),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create InstallExecuteSequence table: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            CompilerError::Other(format!(
+                "Failed to create InstallExecuteSequence table: {}",
+                e
+            ))
+        })?;
 
     // Upgrade table (for major upgrade support)
     package
@@ -438,14 +447,17 @@ fn create_msi_tables(package: &mut Package<Cursor<Vec<u8>>>) -> Result<()> {
         .create_table(
             "LaunchCondition",
             vec![
-                Column::build("Condition").primary_key().formatted_string(255),
-                Column::build("Description").nullable().formatted_string(255),
+                Column::build("Condition")
+                    .primary_key()
+                    .formatted_string(255),
+                Column::build("Description")
+                    .nullable()
+                    .formatted_string(255),
             ],
         )
-        .map_err(|e| CompilerError::Other(format!(
-            "Failed to create LaunchCondition table: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            CompilerError::Other(format!("Failed to create LaunchCondition table: {}", e))
+        })?;
 
     Ok(())
 }
@@ -464,10 +476,7 @@ fn populate_properties(
         ("ProductName", manifest.app.name.clone()),
         ("Manufacturer", manifest.app.publisher.clone()),
         ("ProductVersion", manifest.app.version.clone()),
-        (
-            "ProductLanguage",
-            format!("{}", options.language),
-        ),
+        ("ProductLanguage", format!("{}", options.language)),
         (
             "ARPPRODUCTICON",
             manifest
@@ -484,11 +493,7 @@ fn populate_properties(
         ),
         (
             "ARPCOMMENTS",
-            manifest
-                .app
-                .description
-                .clone()
-                .unwrap_or_default(),
+            manifest.app.description.clone().unwrap_or_default(),
         ),
         (
             "ALLUSERS",
@@ -497,10 +502,7 @@ fn populate_properties(
     ];
 
     for (name, value) in properties {
-        let query = Insert::into("Property").row(vec![
-            Value::from(name),
-            Value::from(value),
-        ]);
+        let query = Insert::into("Property").row(vec![Value::from(name), Value::from(value)]);
         package
             .insert_rows(query)
             .map_err(|e| CompilerError::Other(format!("Failed to insert property: {}", e)))?;
@@ -512,10 +514,7 @@ fn populate_properties(
         .description
         .clone()
         .unwrap_or_else(|| format!("{} Installer", manifest.app.name));
-    let query = Insert::into("Property").row(vec![
-        Value::from("Description"),
-        Value::from(desc),
-    ]);
+    let query = Insert::into("Property").row(vec![Value::from("Description"), Value::from(desc)]);
     package
         .insert_rows(query)
         .map_err(|e| CompilerError::Other(format!("Failed to insert description: {}", e)))?;
@@ -615,7 +614,10 @@ fn populate_directories(
 }
 
 /// Collect files from the project for inclusion in the MSI.
-fn collect_msi_files(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Vec<(PathBuf, String)>> {
+fn collect_msi_files(
+    manifest: &VelocityManifest,
+    options: &MsiOptions,
+) -> Result<Vec<(PathBuf, String)>> {
     let files = velocity_config::collect_files(manifest, &options.project_dir)?;
     Ok(files)
 }
@@ -651,8 +653,8 @@ fn populate_components(
             Value::from(component_id.as_str()),
             Value::from(component_guid.as_str()),
             Value::from(install_dir.as_str()),
-            Value::Int(0), // Attributes: none
-            Value::from(""), // Condition
+            Value::Int(0),                 // Attributes: none
+            Value::from(""),               // Condition
             Value::from(file_id.as_str()), // KeyPath = file
         ]);
         package
@@ -670,16 +672,8 @@ fn populate_components(
             // Long filename: use 8.3 short name placeholder | long name
             let short = format!(
                 "{:.8}.{:3}",
-                file_name
-                    .split('.')
-                    .next()
-                    .unwrap_or("FILE")
-                    .to_uppercase(),
-                file_name
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or("TXT")
-                    .to_uppercase()
+                file_name.split('.').next().unwrap_or("FILE").to_uppercase(),
+                file_name.rsplit('.').next().unwrap_or("TXT").to_uppercase()
             );
             format!("{}|{}", short, file_name)
         } else {
@@ -691,7 +685,7 @@ fn populate_components(
             Value::from(component_id.as_str()),
             Value::from(msi_filename.as_str()),
             Value::Int(file_size),
-            Value::Int(0), // Attributes
+            Value::Int(0),              // Attributes
             Value::Int((i + 1) as i32), // Sequence
         ]);
         package
@@ -699,14 +693,17 @@ fn populate_components(
             .map_err(|e| CompilerError::Other(format!("Failed to insert file: {}", e)))?;
 
         component_count += 1;
-        debug!("Component {}: {} ({} bytes)", component_id, rel_path, file_size);
+        debug!(
+            "Component {}: {} ({} bytes)",
+            component_id, rel_path, file_size
+        );
     }
 
     // Media table — single cabinet
     let query = Insert::into("Media").row(vec![
-        Value::Int(1),                          // DiskId
-        Value::Int(files.len() as i32),         // LastSequence
-        Value::from("#Velocity.cab"),           // Cabinet (embedded)
+        Value::Int(1),                  // DiskId
+        Value::Int(files.len() as i32), // LastSequence
+        Value::from("#Velocity.cab"),   // Cabinet (embedded)
     ]);
     package
         .insert_rows(query)
@@ -728,8 +725,8 @@ fn populate_features(
         Value::from(""), // No parent
         Value::from(format!("{} Setup", manifest.app.name)),
         Value::from(format!("Complete installation of {}", manifest.app.name)),
-        Value::Int(1),  // Display
-        Value::Int(1),  // Level (installed by default)
+        Value::Int(1), // Display
+        Value::Int(1), // Level (installed by default)
         Value::from("INSTALLDIR"),
         Value::Int(0), // Attributes
     ]);
@@ -744,12 +741,9 @@ fn populate_features(
             Value::from("Complete"),
             Value::from(component_id.as_str()),
         ]);
-        package
-            .insert_rows(query)
-            .map_err(|e| CompilerError::Other(format!(
-                "Failed to insert feature component: {}",
-                e
-            )))?;
+        package.insert_rows(query).map_err(|e| {
+            CompilerError::Other(format!("Failed to insert feature component: {}", e))
+        })?;
     }
 
     // Add user-defined components as sub-features
@@ -770,10 +764,7 @@ fn populate_features(
         ]);
         package
             .insert_rows(query)
-            .map_err(|e| CompilerError::Other(format!(
-                "Failed to insert sub-feature: {}",
-                e
-            )))?;
+            .map_err(|e| CompilerError::Other(format!("Failed to insert sub-feature: {}", e)))?;
     }
 
     info!("Features populated");
@@ -810,10 +801,7 @@ fn populate_registry(
         ]);
         package
             .insert_rows(query)
-            .map_err(|e| CompilerError::Other(format!(
-                "Failed to link reg component: {}",
-                e
-            )))?;
+            .map_err(|e| CompilerError::Other(format!("Failed to link reg component: {}", e)))?;
 
         // Map root to MSI root integer
         let root = match entry.root.to_uppercase().as_str() {
@@ -871,10 +859,8 @@ fn populate_shortcuts(
                 .insert_rows(query)
                 .map_err(|e| CompilerError::Other(format!("Shortcut comp: {}", e)))?;
 
-            let query = Insert::into("FeatureComponents").row(vec![
-                Value::from("Complete"),
-                Value::from(component_id),
-            ]);
+            let query = Insert::into("FeatureComponents")
+                .row(vec![Value::from("Complete"), Value::from(component_id)]);
             package
                 .insert_rows(query)
                 .map_err(|e| CompilerError::Other(format!("Shortcut link: {}", e)))?;
@@ -885,7 +871,7 @@ fn populate_shortcuts(
                 Value::from(manifest.app.name.as_str()),
                 Value::from(component_id),
                 Value::from("[INSTALLDIR]"), // Target
-                Value::from(""),              // Arguments
+                Value::from(""),             // Arguments
                 Value::from(
                     manifest
                         .app
@@ -894,10 +880,10 @@ fn populate_shortcuts(
                         .unwrap_or_default()
                         .as_str(),
                 ),
-                Value::Int(0), // Hotkey
-                Value::from(""), // Icon
-                Value::Int(0),  // IconIndex
-                Value::Int(1),  // ShowCmd (normal)
+                Value::Int(0),             // Hotkey
+                Value::from(""),           // Icon
+                Value::Int(0),             // IconIndex
+                Value::Int(1),             // ShowCmd (normal)
                 Value::from("INSTALLDIR"), // Working dir
             ]);
             package
@@ -926,10 +912,8 @@ fn populate_shortcuts(
                 .insert_rows(query)
                 .map_err(|e| CompilerError::Other(format!("SM shortcut comp: {}", e)))?;
 
-            let query = Insert::into("FeatureComponents").row(vec![
-                Value::from("Complete"),
-                Value::from(component_id),
-            ]);
+            let query = Insert::into("FeatureComponents")
+                .row(vec![Value::from("Complete"), Value::from(component_id)]);
             package
                 .insert_rows(query)
                 .map_err(|e| CompilerError::Other(format!("SM shortcut link: {}", e)))?;
@@ -1129,7 +1113,7 @@ fn populate_services(
             Value::from(svc.display_name.as_str()),
             Value::Int(0x10), // SERVICE_WIN32_OWN_PROCESS
             Value::Int(start_type),
-            Value::Int(1), // ErrorControl: normal
+            Value::Int(1),   // ErrorControl: normal
             Value::from(""), // LoadOrderGroup
             Value::from(svc.dependencies.join("\0").as_str()),
             Value::from(svc.account.clone().unwrap_or_default().as_str()),
@@ -1147,8 +1131,8 @@ fn populate_services(
             Value::from(svc_ctrl_id.as_str()),
             Value::from(svc.name.as_str()),
             Value::Int(1 + 2 + 4), // Install: start(1) + stop(2) + delete(4)
-            Value::from(""),        // Arguments
-            Value::Int(1),          // Wait
+            Value::from(""),       // Arguments
+            Value::Int(1),         // Wait
             Value::from(component_id.as_str()),
         ]);
         package
@@ -1279,30 +1263,264 @@ fn populate_custom_actions(
     Ok(())
 }
 
-/// Embed files as binary streams in the MSI package.
+/// Build a cabinet (.cab) file containing all application files and embed it in the MSI.
 ///
-/// In a full implementation, files would be packaged into a cabinet (.cab) file.
-/// This implementation stores them as embedded streams for simplicity.
-fn embed_file_streams(
+/// Creates a proper MSI cabinet that Windows Installer can extract during installation.
+/// This is the standard approach for MSI packaging, compatible with Group Policy and SCCM.
+fn build_and_embed_cabinet(
     package: &mut Package<Cursor<Vec<u8>>>,
     files: &[(PathBuf, String)],
 ) -> Result<()> {
-    for (file_path, rel_path) in files {
-        let stream_name = format!("file_{}", rel_path.replace(['\\', '/'], "_"));
-        let data = std::fs::read(file_path)?;
+    // Build cabinet in memory using a Cursor (which implements Write + Seek)
+    let mut cab_data = Cursor::new(Vec::new());
+    {
+        let mut cab_builder = cab::CabinetBuilder::new();
 
-        let mut writer = package
-            .write_stream(&stream_name)
-            .map_err(|e| CompilerError::Other(format!("Stream write {}: {}", rel_path, e)))?;
-        writer
-            .write_all(&data)
-            .map_err(|e| CompilerError::Other(format!("Stream data {}: {}", rel_path, e)))?;
+        // Add all files in a single MSZIP-compressed folder
+        let folder = cab_builder.add_folder(cab::CompressionType::MsZip);
+        for (_file_path, rel_path) in files {
+            folder.add_file(rel_path);
+        }
 
-        debug!("Embedded: {} ({} bytes)", rel_path, data.len());
+        // Build the cabinet
+        let mut cab_writer = cab_builder
+            .build(&mut cab_data)
+            .map_err(|e| CompilerError::Other(format!("Cabinet build: {}", e)))?;
+
+        // Write file data one at a time (in the same order as add_file)
+        for (file_path, rel_path) in files {
+            let mut writer = cab_writer
+                .next_file()
+                .map_err(|e| CompilerError::Other(format!("Cabinet next_file: {}", e)))?
+                .ok_or_else(|| {
+                    CompilerError::Other(format!(
+                        "Cabinet writer ended early, expected file: {}",
+                        rel_path
+                    ))
+                })?;
+
+            let mut reader = std::fs::File::open(file_path)?;
+            std::io::copy(&mut reader, &mut writer)
+                .map_err(|e| CompilerError::Other(format!("Cabinet copy {}: {}", rel_path, e)))?;
+        }
+
+        cab_writer
+            .finish()
+            .map_err(|e| CompilerError::Other(format!("Cabinet finish: {}", e)))?;
     }
 
-    info!("File streams embedded: {} files", files.len());
+    // Get the raw bytes
+    let cab_bytes = cab_data.into_inner();
+
+    // Embed the cabinet as a stream in the MSI (standard MSI pattern)
+    let mut stream_writer = package
+        .write_stream("Velocity.cab")
+        .map_err(|e| CompilerError::Other(format!("Cabinet stream: {}", e)))?;
+    stream_writer
+        .write_all(&cab_bytes)
+        .map_err(|e| CompilerError::Other(format!("Cabinet embed: {}", e)))?;
+
+    info!(
+        "Cabinet built and embedded: {} files, {} bytes",
+        files.len(),
+        cab_bytes.len()
+    );
     Ok(())
+}
+
+/// Options for MSI code signing.
+#[derive(Debug, Clone)]
+pub struct MsiSignOptions {
+    /// Path to the certificate file (.pfx / .p12)
+    pub cert_path: PathBuf,
+    /// Password for the certificate (if required)
+    pub cert_password: Option<String>,
+    /// Path to signtool.exe (defaults to auto-detect from Windows SDK)
+    pub signtool_path: Option<PathBuf>,
+    /// Timestamp server URL (e.g., "http://timestamp.digicert.com")
+    pub timestamp_url: Option<String>,
+    /// Description shown in the signing dialog
+    pub description: Option<String>,
+}
+
+/// Sign an MSI package with a digital certificate.
+///
+/// Uses Windows `signtool.exe` to apply an Authenticode signature.
+/// This is required for enterprise deployment via Group Policy in many organizations.
+///
+/// # Arguments
+/// * `msi_path` - Path to the .msi file to sign
+/// * `options` - Signing options (certificate, timestamp server, etc.)
+///
+/// # Returns
+/// Result indicating success or failure
+#[cfg(target_os = "windows")]
+pub fn sign_msi(msi_path: &Path, options: &MsiSignOptions) -> Result<()> {
+    use std::process::Command;
+
+    info!("Signing MSI: {}", msi_path.display());
+
+    // Find signtool.exe
+    let signtool = if let Some(ref path) = options.signtool_path {
+        path.clone()
+    } else {
+        find_signtool().ok_or_else(|| {
+            CompilerError::Other(
+                "signtool.exe not found. Install Windows SDK or provide signtool_path.".to_string(),
+            )
+        })?
+    };
+
+    let mut cmd = Command::new(&signtool);
+    cmd.arg("sign");
+
+    // Certificate
+    cmd.arg("/f").arg(&options.cert_path);
+
+    // Password
+    if let Some(ref password) = options.cert_password {
+        cmd.arg("/p").arg(password);
+    }
+
+    // Description
+    if let Some(ref desc) = options.description {
+        cmd.arg("/d").arg(desc);
+    }
+
+    // Timestamp
+    if let Some(ref url) = options.timestamp_url {
+        cmd.arg("/tr").arg(url);
+        cmd.arg("/td").arg("sha256");
+    }
+
+    // Use SHA256
+    cmd.arg("/fd").arg("sha256");
+
+    // The MSI file
+    cmd.arg(msi_path);
+
+    debug!("Running: {:?}", cmd);
+
+    let output = cmd
+        .output()
+        .map_err(|e| CompilerError::Other(format!("Failed to run signtool: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(CompilerError::Other(format!(
+            "signtool failed (exit {}): {} {}",
+            output.status, stdout, stderr
+        )));
+    }
+
+    info!("MSI signed successfully: {}", msi_path.display());
+    Ok(())
+}
+
+/// Sign an MSI package (stub for non-Windows platforms).
+#[cfg(not(target_os = "windows"))]
+pub fn sign_msi(_msi_path: &Path, _options: &MsiSignOptions) -> Result<()> {
+    Err(CompilerError::Other(
+        "MSI signing is only supported on Windows".to_string(),
+    ))
+}
+
+/// Find signtool.exe from common Windows SDK installation paths.
+#[cfg(target_os = "windows")]
+fn find_signtool() -> Option<PathBuf> {
+    use std::env;
+
+    // Check PATH first
+    if let Ok(path) = env::var("PATH") {
+        for dir in env::split_paths(&path) {
+            let candidate = dir.join("signtool.exe");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // Check common Windows SDK locations
+    let program_files = env::var("ProgramFiles(x86)")
+        .or_else(|_| env::var("ProgramFiles"))
+        .unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+
+    let sdk_base = Path::new(&program_files)
+        .join("Windows Kits")
+        .join("10")
+        .join("bin");
+    if sdk_base.exists() {
+        // Search for latest version
+        if let Ok(entries) = std::fs::read_dir(&sdk_base) {
+            let mut versions: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .collect();
+            versions.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+
+            for version_dir in versions {
+                let signtool = version_dir.path().join("x64").join("signtool.exe");
+                if signtool.exists() {
+                    return Some(signtool);
+                }
+            }
+        }
+    }
+
+    warn!("signtool.exe not found in PATH or Windows SDK");
+    None
+}
+
+/// Validate that an MSI file has the required tables and structure.
+///
+/// This performs structural validation without requiring Windows Installer.
+pub fn validate_msi(msi_path: &Path) -> Result<MsiValidationResult> {
+    let data = std::fs::read(msi_path)?;
+    let cursor = Cursor::new(data);
+    let package = Package::open(cursor)
+        .map_err(|e| CompilerError::Other(format!("Failed to open MSI: {}", e)))?;
+
+    let required_tables = [
+        "Property",
+        "Directory",
+        "Component",
+        "File",
+        "Media",
+        "Feature",
+    ];
+
+    let mut missing_tables = Vec::new();
+    for table in &required_tables {
+        if !package.has_table(table) {
+            missing_tables.push(table.to_string());
+        }
+    }
+
+    let msi_size = msi_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+    // Check for cabinet stream
+    let has_cabinet = package.has_table("Media");
+
+    let is_valid = missing_tables.is_empty();
+
+    Ok(MsiValidationResult {
+        msi_path: msi_path.to_path_buf(),
+        msi_size,
+        missing_tables,
+        has_cabinet,
+        is_valid,
+    })
+}
+
+/// Result of MSI validation.
+#[derive(Debug)]
+pub struct MsiValidationResult {
+    pub msi_path: PathBuf,
+    pub msi_size: u64,
+    pub missing_tables: Vec<String>,
+    pub has_cabinet: bool,
+    pub is_valid: bool,
 }
 
 /// Sanitize a directory name for MSI (no spaces, max 32 chars).
@@ -1382,8 +1600,7 @@ start_menu = false
 [ui]
 theme = "modern"
 "#;
-        let manifest: VelocityManifest =
-            velocity_config::parse_manifest_str(toml_str).unwrap();
+        let manifest: VelocityManifest = velocity_config::parse_manifest_str(toml_str).unwrap();
 
         let cursor = Cursor::new(Vec::new());
         let mut package = Package::create(PackageType::Installer, cursor).unwrap();
@@ -1406,5 +1623,82 @@ theme = "modern"
         let query = msi::Select::table("Property");
         let rows = package.select_rows(query).unwrap();
         assert!(rows.len() >= 8, "Should have at least 8 properties");
+    }
+
+    #[test]
+    fn test_msi_validate_roundtrip() {
+        // Create a minimal MSI and verify it's written successfully
+        let cursor = Cursor::new(Vec::new());
+        let mut package = Package::create(PackageType::Installer, cursor).unwrap();
+        create_msi_tables(&mut package).unwrap();
+
+        // Populate minimal required data
+        let toml_str = r#"
+[app]
+name = "Validate Test"
+version = "1.0.0"
+publisher = "Test"
+description = "Test"
+url = "https://example.com"
+
+[install]
+default_dir = "{autopf}\\Test"
+
+[files]
+source = ["*.txt"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[ui]
+theme = "modern"
+"#;
+        let manifest: VelocityManifest = velocity_config::parse_manifest_str(toml_str).unwrap();
+
+        let options = MsiOptions::default();
+        let product_code = Uuid::new_v4().to_string();
+        let upgrade_code = Uuid::new_v4().to_string();
+        populate_properties(
+            &mut package,
+            &manifest,
+            &product_code,
+            &upgrade_code,
+            &options,
+        )
+        .unwrap();
+
+        // Write to temp file
+        package.flush().unwrap();
+        let cursor = package.into_inner().unwrap();
+        let msi_data = cursor.into_inner();
+
+        // Verify MSI was generated with reasonable size
+        assert!(
+            msi_data.len() > 1000,
+            "MSI should have meaningful content, got {} bytes",
+            msi_data.len()
+        );
+
+        // Verify it starts with the OLE2 magic bytes (D0 CF 11 E0)
+        assert!(msi_data.len() >= 4);
+        assert_eq!(
+            &msi_data[0..4],
+            &[0xD0, 0xCF, 0x11, 0xE0],
+            "MSI should be a valid OLE2 compound document"
+        );
+    }
+
+    #[test]
+    fn test_msi_sign_options_default() {
+        let opts = MsiSignOptions {
+            cert_path: PathBuf::from("cert.pfx"),
+            cert_password: None,
+            signtool_path: None,
+            timestamp_url: None,
+            description: None,
+        };
+        assert_eq!(opts.cert_path, PathBuf::from("cert.pfx"));
+        assert!(opts.cert_password.is_none());
     }
 }

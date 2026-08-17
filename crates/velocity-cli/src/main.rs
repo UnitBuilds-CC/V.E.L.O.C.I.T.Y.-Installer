@@ -167,7 +167,15 @@ fn main() -> Result<()> {
             delta,
             quiet,
         } => {
-            commands::build::run(output, compression, format, package_format, runtime, delta, quiet)?;
+            commands::build::run(
+                output,
+                compression,
+                format,
+                package_format,
+                runtime,
+                delta,
+                quiet,
+            )?;
         }
         Commands::Detect { dir } => {
             commands::detect::run(&dir)?;

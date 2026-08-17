@@ -27,6 +27,7 @@ toml = "0.8"
 zstd = "0.13"
 tar = "0.4"
 lzma-rs = "0.3"
+bsdiff = "0.2"
 
 # Windows APIs (Windows-only)
 windows = { version = "0.62", features = [
@@ -68,9 +69,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Filesystem
 glob = "0.3"
 walkdir = "2"
+fs2 = "0.4"
 
 # Windows Installer (MSI)
 msi = "0.7"
+cab = "0.4"
 
 # Misc
 sha2 = "0.10"

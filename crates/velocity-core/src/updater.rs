@@ -181,7 +181,7 @@ pub fn should_use_delta(delta_info: &Option<DeltaInfo>, full_size: u64) -> bool 
             // and not too many hops (max 5)
             let delta_threshold = (full_size as f64 * 0.7) as u64;
             let use_delta = delta.size < delta_threshold && delta.hops <= 5;
-            
+
             if use_delta {
                 info!(
                     "Using delta update: {} bytes (vs {} bytes full, {}% reduction)",
@@ -195,7 +195,7 @@ pub fn should_use_delta(delta_info: &Option<DeltaInfo>, full_size: u64) -> bool 
                     delta.size, full_size, delta.hops
                 );
             }
-            
+
             use_delta
         }
         None => false,
@@ -206,17 +206,14 @@ pub fn should_use_delta(delta_info: &Option<DeltaInfo>, full_size: u64) -> bool 
 ///
 /// Downloads the delta package, applies it to the current installation,
 /// and verifies the result.
-pub fn apply_delta_update(
-    install_dir: &std::path::Path,
-    delta_info: &DeltaInfo,
-) -> Result<()> {
+pub fn apply_delta_update(install_dir: &std::path::Path, delta_info: &DeltaInfo) -> Result<()> {
     use crate::delta::{apply_delta, load_delta_package};
 
     info!("Downloading delta update from: {}", delta_info.url);
 
     // Download delta package
     let delta_data = crate::downloader::download_to_memory(&delta_info.url)?;
-    
+
     info!("Downloaded {} bytes", delta_data.len());
 
     // Save to temporary file
@@ -227,7 +224,10 @@ pub fn apply_delta_update(
     let delta = load_delta_package(&temp_delta)?;
 
     // Apply delta
-    info!("Applying delta: {} -> {}", delta.from_version, delta.to_version);
+    info!(
+        "Applying delta: {} -> {}",
+        delta.from_version, delta.to_version
+    );
     apply_delta(&delta, install_dir)?;
 
     // Cleanup temporary file
