@@ -63,6 +63,9 @@ impl RuntimeArgs {
 }
 
 fn main() -> Result<()> {
+    // Install a panic hook that writes crash info to a log file
+    install_crash_handler();
+
     // Initialize console logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -886,4 +889,58 @@ fn run_uninstall(exe_path: &std::path::Path, args: &RuntimeArgs) -> Result<()> {
 
     info!("Uninstallation complete!");
     Ok(())
+}
+
+/// Install a panic hook that writes crash information to a log file in the temp
+/// directory. This ensures that even if the installer panics, there's a record
+/// of what went wrong for debugging.
+fn install_crash_handler() {
+    std::panic::set_hook(Box::new(|info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic payload".to_string()
+        };
+
+        let location = if let Some(loc) = info.location() {
+            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
+        } else {
+            "unknown location".to_string()
+        };
+
+        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+
+        let crash_report = format!(
+            "=== Velocity Installer Crash Report ===\n\
+             Time: {:?}\n\
+             PID: {}\n\
+             Location: {}\n\
+             Panic: {}\n\n\
+             Backtrace:\n{}\n\
+             =========================================\n",
+            std::time::SystemTime::now(),
+            std::process::id(),
+            location,
+            payload,
+            backtrace,
+        );
+
+        // Write to temp directory
+        let crash_dir = std::env::temp_dir().join("velocity_crashes");
+        let _ = std::fs::create_dir_all(&crash_dir);
+        let crash_file = crash_dir.join(format!(
+            "crash_{}.log",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::write(&crash_file, &crash_report);
+
+        // Also log via tracing if possible
+        eprintln!("FATAL: Installer crashed at {}\n{}", location, payload);
+        eprintln!("Crash report written to: {}", crash_file.display());
+    }));
 }
