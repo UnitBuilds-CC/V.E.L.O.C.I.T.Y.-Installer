@@ -19,9 +19,12 @@ pub fn apply_registry_entry(entry: &RegistryEntry) -> Result<()> {
     let root_key = get_root_key(&entry.root)?;
     info!("Writing registry: {}\\{}", entry.root, entry.key);
 
-    let (key, _) = root_key
-        .create_subkey(&entry.key)
-        .map_err(|e| CoreError::registry("create registry key", format!("Failed to create key '{}': {}", entry.key, e)))?;
+    let (key, _) = root_key.create_subkey(&entry.key).map_err(|e| {
+        CoreError::registry(
+            "create registry key",
+            format!("Failed to create key '{}': {}", entry.key, e),
+        )
+    })?;
 
     let value_name = entry.name.as_deref().unwrap_or("");
 
@@ -32,14 +35,21 @@ pub fn apply_registry_entry(entry: &RegistryEntry) -> Result<()> {
         }
         "dword" | "REG_DWORD" => {
             let val: u32 = entry.value.parse().map_err(|_| {
-                CoreError::registry("parse DWORD", format!("Invalid DWORD value: '{}'", entry.value))
+                CoreError::registry(
+                    "parse DWORD",
+                    format!("Invalid DWORD value: '{}'", entry.value),
+                )
             })?;
             key.set_value(value_name, &val)
                 .map_err(|e| CoreError::registry("set DWORD value", format!("{}", e)))?;
         }
         "expand_string" | "REG_EXPAND_SZ" => {
             use winreg::RegValue;
-            let wide: Vec<u16> = entry.value.encode_utf16().chain(std::iter::once(0)).collect();
+            let wide: Vec<u16> = entry
+                .value
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
             let bytes: Vec<u8> = wide.iter().flat_map(|w| w.to_le_bytes()).collect();
             let reg_value = RegValue {
                 vtype: winreg::enums::RegType::REG_EXPAND_SZ,
@@ -60,7 +70,10 @@ pub fn apply_registry_entry(entry: &RegistryEntry) -> Result<()> {
         }
     }
 
-    debug!("Registry entry applied: {}\\{} = {}", entry.root, entry.key, entry.value);
+    debug!(
+        "Registry entry applied: {}\\{} = {}",
+        entry.root, entry.key, entry.value
+    );
     Ok(())
 }
 
@@ -80,17 +93,30 @@ fn remove_registry_entry(entry: &RegistryEntry) -> Result<()> {
 
     if let Some(name) = &entry.name {
         // Remove a specific value
-        let key = root_key
-            .open_subkey(&entry.key)
-            .map_err(|e| CoreError::registry("open registry key", format!("Failed to open key '{}': {}", entry.key, e)))?;
-        key.delete_value(name.as_str())
-            .map_err(|e| CoreError::registry("delete value", format!("Failed to delete value '{}': {}", name, e)))?;
-        debug!("Deleted registry value: {}\\{}\\{}", entry.root, entry.key, name);
+        let key = root_key.open_subkey(&entry.key).map_err(|e| {
+            CoreError::registry(
+                "open registry key",
+                format!("Failed to open key '{}': {}", entry.key, e),
+            )
+        })?;
+        key.delete_value(name.as_str()).map_err(|e| {
+            CoreError::registry(
+                "delete value",
+                format!("Failed to delete value '{}': {}", name, e),
+            )
+        })?;
+        debug!(
+            "Deleted registry value: {}\\{}\\{}",
+            entry.root, entry.key, name
+        );
     } else {
         // Remove the entire key
-        root_key
-            .delete_subkey_all(&entry.key)
-            .map_err(|e| CoreError::registry("delete key", format!("Failed to delete key '{}': {}", entry.key, e)))?;
+        root_key.delete_subkey_all(&entry.key).map_err(|e| {
+            CoreError::registry(
+                "delete key",
+                format!("Failed to delete key '{}': {}", entry.key, e),
+            )
+        })?;
         debug!("Deleted registry key: {}\\{}", entry.root, entry.key);
     }
 
@@ -132,8 +158,11 @@ pub fn write_uninstall_entry(
         .map_err(|e| CoreError::registry("set InstallLocation", format!("{}", e)))?;
     key.set_value("UninstallString", &format!("\"{}\"", uninstaller_path))
         .map_err(|e| CoreError::registry("set UninstallString", format!("{}", e)))?;
-    key.set_value("QuietUninstallString", &format!("\"{}\" /quiet", uninstaller_path))
-        .map_err(|e| CoreError::registry("set QuietUninstallString", format!("{}", e)))?;
+    key.set_value(
+        "QuietUninstallString",
+        &format!("\"{}\" /quiet", uninstaller_path),
+    )
+    .map_err(|e| CoreError::registry("set QuietUninstallString", format!("{}", e)))?;
 
     // NoModify and NoRepair = 1 (hide modify/repair buttons)
     key.set_value("NoModify", &1u32)
@@ -178,8 +207,7 @@ pub fn remove_uninstall_entry(app_name: &str) -> Result<()> {
     );
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    hklm
-        .delete_subkey_all(&uninstall_key)
+    hklm.delete_subkey_all(&uninstall_key)
         .map_err(|e| CoreError::registry("remove uninstall entry", format!("{}", e)))?;
 
     info!("Uninstall entry removed for: {}", app_name);
@@ -193,6 +221,9 @@ fn get_root_key(root: &str) -> Result<RegKey> {
         "HKCU" => Ok(RegKey::predef(HKEY_CURRENT_USER)),
         "HKCR" => Ok(RegKey::predef(HKEY_CLASSES_ROOT)),
         "HKU" => Ok(RegKey::predef(HKEY_USERS)),
-        _ => Err(CoreError::registry("unknown root", format!("Unknown registry root: {}", root))),
+        _ => Err(CoreError::registry(
+            "unknown root",
+            format!("Unknown registry root: {}", root),
+        )),
     }
 }

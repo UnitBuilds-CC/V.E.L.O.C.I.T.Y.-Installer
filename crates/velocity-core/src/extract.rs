@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// Supported compression formats for the payload archive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CompressionFormat {
     /// Zstandard — fast, good ratio (default)
     #[default]
@@ -20,7 +19,6 @@ pub enum CompressionFormat {
     /// LZMA2 — slower, better ratio (Inno Setup compatible)
     Lzma2,
 }
-
 
 impl CompressionFormat {
     /// Detect compression format from magic bytes.
@@ -72,22 +70,23 @@ pub fn extract_archive(
     std::fs::create_dir_all(target_dir)?;
 
     // Auto-detect compression format
-    let format = CompressionFormat::detect(compressed_data)
-        .unwrap_or(CompressionFormat::Zstd);
+    let format = CompressionFormat::detect(compressed_data).unwrap_or(CompressionFormat::Zstd);
     info!("Detected compression format: {:?}", format);
 
     // Decompress based on format
     let decompressed = match format {
-        CompressionFormat::Zstd => {
-            zstd::decode_all(compressed_data)
-                .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?
-        }
+        CompressionFormat::Zstd => zstd::decode_all(compressed_data)
+            .map_err(|e| CoreError::compression("zstd decompression", format!("{}", e)))?,
         CompressionFormat::Lzma2 => {
             let mut output = Vec::new();
             // Try XZ format first (has magic bytes), fall back to raw LZMA
             let decompress_result = if compressed_data.len() >= 6
-                && compressed_data[0] == 0xFD && compressed_data[1] == 0x37 && compressed_data[2] == 0x7A
-                && compressed_data[3] == 0x58 && compressed_data[4] == 0x5A && compressed_data[5] == 0x00
+                && compressed_data[0] == 0xFD
+                && compressed_data[1] == 0x37
+                && compressed_data[2] == 0x7A
+                && compressed_data[3] == 0x58
+                && compressed_data[4] == 0x5A
+                && compressed_data[5] == 0x00
             {
                 lzma_rs::xz_decompress(&mut std::io::Cursor::new(compressed_data), &mut output)
             } else {
@@ -104,10 +103,14 @@ pub fn extract_archive(
     let mut extracted_files = Vec::new();
     let mut file_count = 0usize;
 
-    for entry in archive.entries().map_err(|e| CoreError::compression("tar", format!("{}", e)))? {
+    for entry in archive
+        .entries()
+        .map_err(|e| CoreError::compression("tar", format!("{}", e)))?
+    {
         let mut entry = entry.map_err(|e| CoreError::compression("tar entry", format!("{}", e)))?;
 
-        let path = entry.path()
+        let path = entry
+            .path()
             .map_err(|e| CoreError::compression("tar path", format!("{}", e)))?
             .into_owned();
 
@@ -119,10 +122,14 @@ pub fn extract_archive(
 
         // Security: ensure we don't escape the target directory
         if !dest_path_within_target(&path, target_dir) {
-            return Err(CoreError::permission_denied("path traversal", format!(
-                "{} escapes target directory {}",
-                path.display(), target_dir.display()
-            )));
+            return Err(CoreError::permission_denied(
+                "path traversal",
+                format!(
+                    "{} escapes target directory {}",
+                    path.display(),
+                    target_dir.display()
+                ),
+            ));
         }
 
         let dest_path = target_dir.join(&path);
@@ -209,7 +216,9 @@ pub fn create_archive_with_format(
 ) -> Result<Vec<u8>> {
     info!(
         "Creating {:?} archive with {} files, compression level {}",
-        format, files.len(), compression_level
+        format,
+        files.len(),
+        compression_level
     );
 
     // Create tar in memory
@@ -230,17 +239,12 @@ pub fn create_archive_with_format(
     // Compress with selected format
     let tar_len = tar_data.len();
     let compressed = match format {
-        CompressionFormat::Zstd => {
-            zstd::encode_all(tar_data.as_slice(), compression_level)
-                .map_err(|e| CoreError::compression("zstd compression", format!("{}", e)))?
-        }
+        CompressionFormat::Zstd => zstd::encode_all(tar_data.as_slice(), compression_level)
+            .map_err(|e| CoreError::compression("zstd compression", format!("{}", e)))?,
         CompressionFormat::Lzma2 => {
             let mut output = Vec::new();
-            lzma_rs::lzma_compress(
-                &mut std::io::Cursor::new(tar_data),
-                &mut output,
-            )
-            .map_err(|e| CoreError::compression("lzma2 compression", format!("{}", e)))?;
+            lzma_rs::lzma_compress(&mut std::io::Cursor::new(tar_data), &mut output)
+                .map_err(|e| CoreError::compression("lzma2 compression", format!("{}", e)))?;
             output
         }
     };
@@ -252,7 +256,9 @@ pub fn create_archive_with_format(
     };
     info!(
         "Archive size: {} bytes (from {} bytes, {:.1}% compression)",
-        compressed.len(), tar_len, ratio
+        compressed.len(),
+        tar_len,
+        ratio
     );
     Ok(compressed)
 }
@@ -344,9 +350,7 @@ mod tests {
 
         std::fs::write(temp_dir.join("lzma_test.txt"), "LZMA2 compressed data!").unwrap();
 
-        let files = vec![
-            (temp_dir.join("lzma_test.txt"), "lzma_test.txt".to_string()),
-        ];
+        let files = vec![(temp_dir.join("lzma_test.txt"), "lzma_test.txt".to_string())];
 
         // Create LZMA2 archive
         let archive = create_archive_with_format(&files, 6, CompressionFormat::Lzma2).unwrap();
@@ -377,7 +381,10 @@ mod tests {
         let files = vec![(temp_dir.join("detect.txt"), "detect.txt".to_string())];
 
         let zstd_archive = create_archive(&files, 3).unwrap();
-        assert_eq!(CompressionFormat::detect(&zstd_archive), Some(CompressionFormat::Zstd));
+        assert_eq!(
+            CompressionFormat::detect(&zstd_archive),
+            Some(CompressionFormat::Zstd)
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

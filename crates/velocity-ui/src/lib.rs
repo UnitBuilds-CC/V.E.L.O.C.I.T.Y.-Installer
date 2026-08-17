@@ -3,10 +3,10 @@
 //! Provides both a modern (WebView2) and classic (Win32) installer wizard.
 
 pub mod classic;
-pub mod wizard;
-pub mod progress_dialog;
-pub mod native_wizard;
 pub mod error;
+pub mod native_wizard;
+pub mod progress_dialog;
+pub mod wizard;
 
 pub use error::*;
 pub use wizard::*;

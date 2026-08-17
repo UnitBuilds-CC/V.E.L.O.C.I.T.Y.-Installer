@@ -33,7 +33,9 @@ enum RollbackOp {
 impl RollbackTracker {
     /// Create a new empty rollback tracker.
     pub fn new() -> Self {
-        Self { operations: Vec::new() }
+        Self {
+            operations: Vec::new(),
+        }
     }
 
     /// Record that a file was created.
@@ -69,13 +71,14 @@ impl RollbackTracker {
 
     /// Record that a service was installed.
     pub fn track_service(&mut self, name: &str) {
-        self.operations.push(RollbackOp::ServiceInstalled(name.to_string()));
+        self.operations
+            .push(RollbackOp::ServiceInstalled(name.to_string()));
     }
 
     /// Roll back all tracked operations in reverse order.
     pub fn rollback(&mut self) -> Result<()> {
         logging::log("ROLLBACK: Starting rollback...");
-        
+
         // Process in reverse order
         for op in self.operations.drain(..).rev() {
             match op {
@@ -87,12 +90,18 @@ impl RollbackTracker {
                 }
                 RollbackOp::DirCreated(path) => {
                     if path.exists() {
-                        logging::log_op("ROLLBACK", &format!("Removing directory: {}", path.display()));
+                        logging::log_op(
+                            "ROLLBACK",
+                            &format!("Removing directory: {}", path.display()),
+                        );
                         let _ = std::fs::remove_dir_all(&path);
                     }
                 }
                 RollbackOp::RegistryWritten { root, path } => {
-                    logging::log_op("ROLLBACK", &format!("Removing registry: {}\\{}", root, path));
+                    logging::log_op(
+                        "ROLLBACK",
+                        &format!("Removing registry: {}\\{}", root, path),
+                    );
                     // Actually remove the registry key
                     let root_key = match root.as_str() {
                         "HKLM" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE),
@@ -105,30 +114,32 @@ impl RollbackTracker {
                 }
                 RollbackOp::ShortcutCreated(path) => {
                     if path.exists() {
-                        logging::log_op("ROLLBACK", &format!("Removing shortcut: {}", path.display()));
+                        logging::log_op(
+                            "ROLLBACK",
+                            &format!("Removing shortcut: {}", path.display()),
+                        );
                         let _ = std::fs::remove_file(&path);
                     }
                 }
                 RollbackOp::EnvVarSet { name, scope } => {
-                    logging::log_op("ROLLBACK", &format!("Removing env var: {} ({})", name, scope));
+                    logging::log_op(
+                        "ROLLBACK",
+                        &format!("Removing env var: {} ({})", name, scope),
+                    );
                     // Actually remove the environment variable
                     let root_key = match scope.as_str() {
-                        "system" => {
-                            winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
-                                .open_subkey_with_flags(
-                                    "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
-                                )
-                                .ok()
-                        }
-                        _ => {
-                            winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-                                .open_subkey_with_flags(
-                                    "Environment",
-                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
-                                )
-                                .ok()
-                        }
+                        "system" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+                            .open_subkey_with_flags(
+                                "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+                                winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                            )
+                            .ok(),
+                        _ => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+                            .open_subkey_with_flags(
+                                "Environment",
+                                winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                            )
+                            .ok(),
                     };
                     if let Some(key) = root_key {
                         let _ = key.delete_value(&name);
@@ -142,7 +153,7 @@ impl RollbackTracker {
                 }
             }
         }
-        
+
         logging::log("ROLLBACK: Rollback complete.");
         Ok(())
     }
@@ -324,7 +335,11 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert_eq!(remaining.len(), 0, "All files and dirs should be rolled back");
+        assert_eq!(
+            remaining.len(),
+            0,
+            "All files and dirs should be rolled back"
+        );
 
         let _ = std::fs::remove_dir_all(&temp);
     }

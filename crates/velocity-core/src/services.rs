@@ -7,7 +7,11 @@ use velocity_config::ServiceEntry;
 /// Validate a Windows service name.
 /// Service names must contain only alphanumeric characters, underscores, hyphens, or dots.
 fn validate_service_name(name: &str) -> Result<()> {
-    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
         return Err(CoreError::other("service name", format!(
             "Invalid service name: '{}'. Service names must contain only alphanumeric characters, underscores, hyphens, or dots.",
             name
@@ -47,13 +51,7 @@ fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<
     let display_arg = format!("DisplayName= {}", svc.display_name);
 
     let mut cmd = std::process::Command::new("sc");
-    cmd.args([
-        "create",
-        &svc.name,
-        &bin_path_arg,
-        &start_arg,
-        &display_arg,
-    ]);
+    cmd.args(["create", &svc.name, &bin_path_arg, &start_arg, &display_arg]);
 
     // Add service account if specified
     if let Some(ref account) = svc.account {
@@ -68,15 +66,16 @@ fn install_service(svc: &ServiceEntry, install_dir: &std::path::Path) -> Result<
         cmd.arg(&depend_arg);
     }
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| CoreError::other("sc create", format!("{}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CoreError::other("install service", format!(
-            "Failed to install service '{}': {}",
-            svc.name, stderr
-        )));
+        return Err(CoreError::other(
+            "install service",
+            format!("Failed to install service '{}': {}", svc.name, stderr),
+        ));
     }
 
     // Set description if provided
@@ -105,7 +104,10 @@ pub fn start_service(name: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("Service start returned non-zero (may already be running): {}", stderr);
+        debug!(
+            "Service start returned non-zero (may already be running): {}",
+            stderr
+        );
     }
     Ok(())
 }
@@ -142,10 +144,10 @@ fn remove_service(name: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CoreError::other("remove service", format!(
-            "Failed to remove service '{}': {}",
-            name, stderr
-        )));
+        return Err(CoreError::other(
+            "remove service",
+            format!("Failed to remove service '{}': {}", name, stderr),
+        ));
     }
 
     debug!("Service removed: {}", name);

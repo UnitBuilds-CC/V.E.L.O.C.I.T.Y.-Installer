@@ -19,16 +19,30 @@ pub fn run(dir: &str) -> Result<()> {
         anyhow::bail!("Project directory not found: {}", project_dir.display());
     }
 
-    let manifest = velocity_config::auto_generate(&project_dir)
-        .context("Auto-detection failed")?;
+    let manifest = velocity_config::auto_generate(&project_dir).context("Auto-detection failed")?;
 
     println!("  Detected settings:");
     println!();
     println!("  Application:");
     println!("    Name:      {}", manifest.app.name);
     println!("    Version:   {}", manifest.app.version);
-    println!("    Publisher: {}", if manifest.app.publisher.is_empty() { "(not detected)" } else { &manifest.app.publisher });
-    println!("    Icon:      {}", manifest.app.icon.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(not found)".to_string()));
+    println!(
+        "    Publisher: {}",
+        if manifest.app.publisher.is_empty() {
+            "(not detected)"
+        } else {
+            &manifest.app.publisher
+        }
+    );
+    println!(
+        "    Icon:      {}",
+        manifest
+            .app
+            .icon
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "(not found)".to_string())
+    );
     println!();
 
     println!("  Installation:");
@@ -57,16 +71,23 @@ pub fn run(dir: &str) -> Result<()> {
     println!("    Desktop:    {}", manifest.shortcuts.desktop);
     println!("    Start Menu: {}", manifest.shortcuts.start_menu);
     if !manifest.shortcuts.custom.is_empty() {
-        println!("    Custom:     {} shortcut(s)", manifest.shortcuts.custom.len());
+        println!(
+            "    Custom:     {} shortcut(s)",
+            manifest.shortcuts.custom.len()
+        );
     }
     println!();
 
     // Scan for actual files that would be included
     match velocity_config::collect_files(&manifest, &project_dir) {
         Ok(files) => {
-            println!("  Detected files: {} file(s) would be packaged", files.len());
+            println!(
+                "  Detected files: {} file(s) would be packaged",
+                files.len()
+            );
             if !files.is_empty() {
-                let total_size: u64 = files.iter()
+                let total_size: u64 = files
+                    .iter()
                     .filter_map(|(path, _)| std::fs::metadata(path).ok().map(|m| m.len()))
                     .sum();
                 println!("  Total size:     {}", format_size(total_size));

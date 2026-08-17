@@ -79,7 +79,10 @@ pub fn is_newer_version(latest: &str, current: &str) -> bool {
     let latest_parts = parse_version(latest);
     let current_parts = parse_version(current);
 
-    debug!("Version comparison: {:?} vs {:?}", latest_parts, current_parts);
+    debug!(
+        "Version comparison: {:?} vs {:?}",
+        latest_parts, current_parts
+    );
 
     // Compare major.minor.patch
     for i in 0..3 {
@@ -98,12 +101,13 @@ pub fn is_newer_version(latest: &str, current: &str) -> bool {
 /// Parse a version string into numeric parts.
 /// Handles formats like "1.2.3", "v1.2.3", "1.2.3-beta".
 fn parse_version(version: &str) -> Vec<u64> {
-    let v = version.trim().trim_start_matches('v').trim_start_matches('V');
+    let v = version
+        .trim()
+        .trim_start_matches('v')
+        .trim_start_matches('V');
     // Strip pre-release suffix for comparison
     let v = v.split('-').next().unwrap_or(v);
-    v.split('.')
-        .filter_map(|s| s.parse::<u64>().ok())
-        .collect()
+    v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect()
 }
 
 /// Fetch update info from the HTTP endpoint.
@@ -113,21 +117,12 @@ fn fetch_update_info(url: &str) -> Result<UpdateInfo> {
     let body = String::from_utf8_lossy(&response);
 
     // Parse JSON response
-    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-        CoreError::Other(format!("Failed to parse update info: {}", e))
-    })?;
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| CoreError::Other(format!("Failed to parse update info: {}", e)))?;
 
-    let latest_version = json["version"]
-        .as_str()
-        .unwrap_or("0.0.0")
-        .to_string();
-    let download_url = json["download_url"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    let release_notes = json["release_notes"]
-        .as_str()
-        .map(|s| s.to_string());
+    let latest_version = json["version"].as_str().unwrap_or("0.0.0").to_string();
+    let download_url = json["download_url"].as_str().unwrap_or("").to_string();
+    let release_notes = json["release_notes"].as_str().map(|s| s.to_string());
 
     Ok(UpdateInfo {
         latest_version,

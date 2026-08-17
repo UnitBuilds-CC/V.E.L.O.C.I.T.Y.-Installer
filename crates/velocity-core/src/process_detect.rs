@@ -16,7 +16,7 @@ pub fn is_process_running(process_name: &str) -> Result<bool> {
         .args(["/FI", &filter, "/NH", "/FO", "CSV"])
         .output()
         .map_err(|e| CoreError::Other(format!("Failed to run tasklist: {}", e)))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     // With CSV output and exact IMAGENAME filter, check if any line contains
     // the exact process name as a quoted CSV field
@@ -44,7 +44,7 @@ pub fn is_app_running(main_exe: &str) -> Result<bool> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(main_exe);
-    
+
     is_process_running(exe_name)
 }
 
@@ -53,17 +53,17 @@ pub fn is_app_running(main_exe: &str) -> Result<bool> {
 /// Returns true if the process exited within the timeout.
 pub fn wait_for_process_exit(process_name: &str, timeout_secs: u64) -> Result<bool> {
     use std::time::{Duration, Instant};
-    
+
     let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
-    
+
     while start.elapsed() < timeout {
         if !is_process_running(process_name)? {
             return Ok(true);
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    
+
     Ok(false)
 }
 
@@ -73,7 +73,7 @@ pub fn list_running_processes() -> Result<Vec<String>> {
         .args(["/FO", "CSV", "/NH"])
         .output()
         .map_err(|e| CoreError::Other(format!("Failed to run tasklist: {}", e)))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let processes: Vec<String> = stdout
         .lines()
@@ -84,7 +84,7 @@ pub fn list_running_processes() -> Result<Vec<String>> {
                 .map(|s| s.trim_matches('"').to_string())
         })
         .collect();
-    
+
     Ok(processes)
 }
 

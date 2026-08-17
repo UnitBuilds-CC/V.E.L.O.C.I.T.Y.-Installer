@@ -131,10 +131,11 @@ fn main() -> Result<()> {
     let filter = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(filter.parse().unwrap_or_else(|_| {
-                    tracing_subscriber::filter::LevelFilter::INFO.into()
-                })),
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(
+                filter
+                    .parse()
+                    .unwrap_or_else(|_| tracing_subscriber::filter::LevelFilter::INFO.into()),
+            ),
         )
         .init();
 

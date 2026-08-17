@@ -11,8 +11,7 @@ pub fn run(
     runtime: Option<String>,
     quiet: bool,
 ) -> Result<()> {
-    let project_dir = std::env::current_dir()
-        .context("Failed to get current directory")?;
+    let project_dir = std::env::current_dir().context("Failed to get current directory")?;
 
     let output_path = output
         .map(PathBuf::from)
@@ -23,7 +22,11 @@ pub fn run(
     if !quiet {
         println!();
         println!("  Building Velocity installer...");
-        println!("  Compression: {} (level {})", format, compression.clamp(0, 22));
+        println!(
+            "  Compression: {} (level {})",
+            format,
+            compression.clamp(0, 22)
+        );
         println!();
     }
 
@@ -36,17 +39,20 @@ pub fn run(
         quiet,
     };
 
-    let result = velocity_compiler::build_installer(&options)
-        .context("Build failed")?;
+    let result = velocity_compiler::build_installer(&options).context("Build failed")?;
 
     if !quiet {
         println!();
         println!("  Build successful!");
         println!();
         println!("  Output:      {}", result.installer_path.display());
-        println!("  Size:        {} bytes", format_size(result.installer_size));
+        println!(
+            "  Size:        {} bytes",
+            format_size(result.installer_size)
+        );
         println!("  Files:       {}", result.file_count);
-        println!("  Payload:     {} (from {})",
+        println!(
+            "  Payload:     {} (from {})",
             format_size(result.payload_size),
             format_size(result.original_size)
         );

@@ -86,11 +86,18 @@ pub fn detect_system_info() -> SystemInfo {
         .ok()
         .map(PathBuf::from);
 
-    let system_dir = get_env_path("SystemRoot", r"C:\Windows")
-        .join(if is_wow64 { "SysWOW64" } else { "System32" });
+    let system_dir = get_env_path("SystemRoot", r"C:\Windows").join(if is_wow64 {
+        "SysWOW64"
+    } else {
+        "System32"
+    });
     let sys_wow64 = if !is_wow64 && supports_64bit {
         let wow = get_env_path("SystemRoot", r"C:\Windows").join("SysWOW64");
-        if wow.exists() { Some(wow) } else { None }
+        if wow.exists() {
+            Some(wow)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -165,23 +172,22 @@ fn detect_wow64() -> bool {
         // from kernel32.dll (always loaded). The transmute target signature matches
         // the actual API exactly. GetCurrentProcess returns a pseudo-handle (no close needed).
         unsafe {
-            use windows::Win32::System::Threading::GetCurrentProcess;
             use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+            use windows::Win32::System::Threading::GetCurrentProcess;
 
             // Dynamically load IsWow64Process for compatibility
             let kernel32 = GetModuleHandleW(windows::core::w!("kernel32.dll")).ok();
             if let Some(module) = kernel32 {
                 // Use GetProcAddress to find IsWow64Process
                 let func_name = windows::core::s!("IsWow64Process");
-                if let Some(func) = windows::Win32::System::LibraryLoader::GetProcAddress(
-                    module,
-                    func_name,
-                ) {
+                if let Some(func) =
+                    windows::Win32::System::LibraryLoader::GetProcAddress(module, func_name)
+                {
                     let is_wow64_fn: unsafe extern "system" fn(
                         windows::Win32::Foundation::HANDLE,
                         *mut windows::Win32::Foundation::BOOL,
-                    ) -> windows::Win32::Foundation::BOOL =
-                        std::mem::transmute(func);
+                    )
+                        -> windows::Win32::Foundation::BOOL = std::mem::transmute(func);
 
                     let mut result = windows::Win32::Foundation::BOOL::from(false);
                     let process = GetCurrentProcess();
@@ -298,8 +304,12 @@ mod tests {
     fn test_detect_system_info() {
         let info = detect_system_info();
         // On any modern Windows, we should detect something
-        assert!(info.os_arch == SystemArch::X64 || info.os_arch == SystemArch::X86 || info.os_arch == SystemArch::Arm64);
-        assert!(info.program_files.to_string_lossy().len() > 0);
+        assert!(
+            info.os_arch == SystemArch::X64
+                || info.os_arch == SystemArch::X86
+                || info.os_arch == SystemArch::Arm64
+        );
+        assert!(!info.program_files.to_string_lossy().is_empty());
     }
 
     #[test]
@@ -322,7 +332,7 @@ mod tests {
         assert!(pf.to_string_lossy().contains("Program Files"));
 
         let tmp = resolve_auto_path("{tmp}", true);
-        assert!(tmp.to_string_lossy().len() > 0);
+        assert!(!tmp.to_string_lossy().is_empty());
     }
 
     #[test]
@@ -330,8 +340,8 @@ mod tests {
         let dir_64 = program_files_dir(true);
         let dir_32 = program_files_dir(false);
         // Both should be valid paths
-        assert!(dir_64.to_string_lossy().len() > 0);
-        assert!(dir_32.to_string_lossy().len() > 0);
+        assert!(!dir_64.to_string_lossy().is_empty());
+        assert!(!dir_32.to_string_lossy().is_empty());
         // On a 64-bit system, they should differ
         if is_64bit_os() {
             assert_ne!(dir_64, dir_32);

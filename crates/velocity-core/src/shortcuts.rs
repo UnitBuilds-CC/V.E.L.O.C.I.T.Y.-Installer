@@ -4,7 +4,7 @@ use crate::error::{CoreError, Result};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
-use velocity_config::{ShortcutConfig, CustomShortcut};
+use velocity_config::{CustomShortcut, ShortcutConfig};
 
 /// Create shortcuts based on the manifest configuration.
 pub fn create_shortcuts(
@@ -114,7 +114,9 @@ pub fn create_lnk(
     impl Drop for ComGuard {
         // SAFETY: CoUninitialize balances the CoInitialize from new().
         fn drop(&mut self) {
-            unsafe { CoUninitialize(); }
+            unsafe {
+                CoUninitialize();
+            }
         }
     }
 
@@ -190,7 +192,11 @@ pub fn create_lnk(
             .map_err(|e| CoreError::com("save shortcut", format!("{}", e)))?;
     }
 
-    debug!("Shortcut created: {} -> {}", lnk_path.display(), target.display());
+    debug!(
+        "Shortcut created: {} -> {}",
+        lnk_path.display(),
+        target.display()
+    );
     Ok(())
 }
 
@@ -257,8 +263,9 @@ fn get_known_folder_path(folder: KnownFolder) -> Result<PathBuf> {
             ptr = ptr.add(1);
         }
         let slice = std::slice::from_raw_parts(path_ptr.0, len);
-        let path_str = String::from_utf16(slice)
-            .map_err(|e| CoreError::com("UTF-16 conversion", format!("Invalid UTF-16 path: {}", e)))?;
+        let path_str = String::from_utf16(slice).map_err(|e| {
+            CoreError::com("UTF-16 conversion", format!("Invalid UTF-16 path: {}", e))
+        })?;
         let path = PathBuf::from(&path_str);
         CoTaskMemFree(Some(path_ptr.0 as *mut _));
         Ok(path)

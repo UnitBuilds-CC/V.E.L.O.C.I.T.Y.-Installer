@@ -90,7 +90,11 @@ fn run_add(config_path: &str, args: &[String]) -> Result<()> {
     }
 
     let name = args[0].clone();
-    let url = if args.len() > 1 { args[1].clone() } else { String::new() };
+    let url = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        String::new()
+    };
 
     // Parse options
     let mut file_type = "exe".to_string();
@@ -105,26 +109,36 @@ fn run_add(config_path: &str, args: &[String]) -> Result<()> {
         match args[i].as_str() {
             "--type" => {
                 i += 1;
-                if i < args.len() { file_type = args[i].clone(); }
+                if i < args.len() {
+                    file_type = args[i].clone();
+                }
             }
             "--args" => {
                 i += 1;
-                if i < args.len() { install_args = args[i].clone(); }
+                if i < args.len() {
+                    install_args = args[i].clone();
+                }
             }
             "--condition" => {
                 i += 1;
-                if i < args.len() { condition = args[i].clone(); }
+                if i < args.len() {
+                    condition = args[i].clone();
+                }
             }
             "--priority" => {
                 i += 1;
-                if i < args.len() { priority = args[i].parse().unwrap_or(100); }
+                if i < args.len() {
+                    priority = args[i].parse().unwrap_or(100);
+                }
             }
             "--optional" => {
                 required = false;
             }
             "--bundled" => {
                 i += 1;
-                if i < args.len() { bundled_path = Some(args[i].clone()); }
+                if i < args.len() {
+                    bundled_path = Some(args[i].clone());
+                }
             }
             _ => {}
         }
@@ -149,7 +163,9 @@ fn run_add(config_path: &str, args: &[String]) -> Result<()> {
     } else {
         // Add as remote dependency
         if url.is_empty() {
-            anyhow::bail!("URL is required for remote dependencies. Use --bundled <path> for bundled apps.");
+            anyhow::bail!(
+                "URL is required for remote dependencies. Use --bundled <path> for bundled apps."
+            );
         }
         let entry = velocity_config::DependencyEntry {
             name: name.clone(),
@@ -166,8 +182,7 @@ fn run_add(config_path: &str, args: &[String]) -> Result<()> {
     }
 
     // Write back to TOML
-    let toml_str = toml::to_string_pretty(&manifest)
-        .context("Failed to serialize manifest")?;
+    let toml_str = toml::to_string_pretty(&manifest).context("Failed to serialize manifest")?;
     std::fs::write(config_path, toml_str)?;
     println!("Updated {}", config_path);
 
@@ -194,7 +209,10 @@ fn run_resolve(config_path: &str) -> Result<()> {
             let needed = velocity_core::dep_resolver::evaluate_condition(&dep.condition);
             let status = if needed { "NEEDED" } else { "SATISFIED" };
             let icon = if needed { "[!]" } else { "[OK]" };
-            println!("  {} {} — {} (condition: {})", icon, dep.name, status, dep.condition);
+            println!(
+                "  {} {} — {} (condition: {})",
+                icon, dep.name, status, dep.condition
+            );
             if needed {
                 needs_install += 1;
             } else {
@@ -210,7 +228,10 @@ fn run_resolve(config_path: &str) -> Result<()> {
             let needed = velocity_core::dep_resolver::evaluate_condition(&app.condition);
             let status = if needed { "NEEDED" } else { "SATISFIED" };
             let icon = if needed { "[!]" } else { "[OK]" };
-            println!("  {} {} — {} (condition: {})", icon, app.name, status, app.condition);
+            println!(
+                "  {} {} — {} (condition: {})",
+                icon, app.name, status, app.condition
+            );
             if needed {
                 needs_install += 1;
             } else {
@@ -220,7 +241,10 @@ fn run_resolve(config_path: &str) -> Result<()> {
         println!();
     }
 
-    println!("Summary: {} need installation, {} already satisfied", needs_install, already_satisfied);
+    println!(
+        "Summary: {} need installation, {} already satisfied",
+        needs_install, already_satisfied
+    );
 
     Ok(())
 }
@@ -251,8 +275,7 @@ fn run_remove(config_path: &str, args: &[String]) -> Result<()> {
     }
 
     // Write back to TOML
-    let toml_str = toml::to_string_pretty(&manifest)
-        .context("Failed to serialize manifest")?;
+    let toml_str = toml::to_string_pretty(&manifest).context("Failed to serialize manifest")?;
     std::fs::write(config_path, toml_str)?;
     println!("Updated {}", config_path);
 
@@ -265,8 +288,8 @@ fn load_manifest(config_path: &str) -> Result<VelocityManifest> {
     if !path.exists() {
         anyhow::bail!("Config file not found: {}", config_path);
     }
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", config_path))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", config_path))?;
     let manifest: VelocityManifest = velocity_config::parse_manifest_str(&content)
         .with_context(|| format!("Failed to parse {}", config_path))?;
     Ok(manifest)

@@ -32,23 +32,44 @@ impl Localizer {
         // Wizard pages
         defaults.insert("wizard_title", "Installation Wizard");
         defaults.insert("wizard_welcome_title", "Welcome");
-        defaults.insert("wizard_welcome_subtitle", "Welcome to the {app_name} Setup Wizard");
+        defaults.insert(
+            "wizard_welcome_subtitle",
+            "Welcome to the {app_name} Setup Wizard",
+        );
         defaults.insert("wizard_welcome_body", "This will install {app_name} {version} on your computer.\n\nClick Next to continue, or Cancel to exit the Setup Wizard.");
         defaults.insert("wizard_license_title", "License Agreement");
-        defaults.insert("wizard_license_subtitle", "Please read the license agreement carefully");
-        defaults.insert("wizard_license_accept", "I accept the terms of the license agreement");
-        defaults.insert("wizard_license_decline", "I do not accept the terms of the license agreement");
+        defaults.insert(
+            "wizard_license_subtitle",
+            "Please read the license agreement carefully",
+        );
+        defaults.insert(
+            "wizard_license_accept",
+            "I accept the terms of the license agreement",
+        );
+        defaults.insert(
+            "wizard_license_decline",
+            "I do not accept the terms of the license agreement",
+        );
         defaults.insert("wizard_select_dir_title", "Select Installation Folder");
-        defaults.insert("wizard_select_dir_subtitle", "Choose where to install {app_name}");
+        defaults.insert(
+            "wizard_select_dir_subtitle",
+            "Choose where to install {app_name}",
+        );
         defaults.insert("wizard_select_dir_label", "Installation folder:");
         defaults.insert("wizard_select_dir_browse", "Browse...");
         defaults.insert("wizard_components_title", "Select Components");
-        defaults.insert("wizard_components_subtitle", "Choose which features to install");
+        defaults.insert(
+            "wizard_components_subtitle",
+            "Choose which features to install",
+        );
         defaults.insert("wizard_install_title", "Installing");
         defaults.insert("wizard_install_subtitle", "Setting up {app_name}");
         defaults.insert("wizard_finish_title", "Installation Complete");
         defaults.insert("wizard_finish_subtitle", "{app_name} has been installed");
-        defaults.insert("wizard_finish_body", "Click Finish to exit the Setup Wizard.");
+        defaults.insert(
+            "wizard_finish_body",
+            "Click Finish to exit the Setup Wizard.",
+        );
         defaults.insert("wizard_finish_launch", "Launch {app_name}");
 
         // Buttons
@@ -65,14 +86,35 @@ impl Localizer {
         defaults.insert("btn_retry", "&Retry");
 
         // Messages
-        defaults.insert("msg_confirm_cancel", "Are you sure you want to cancel the installation?");
-        defaults.insert("msg_confirm_uninstall", "Are you sure you want to uninstall {app_name}?");
-        defaults.insert("msg_install_complete", "{app_name} has been successfully installed.");
-        defaults.insert("msg_uninstall_complete", "{app_name} has been successfully removed.");
+        defaults.insert(
+            "msg_confirm_cancel",
+            "Are you sure you want to cancel the installation?",
+        );
+        defaults.insert(
+            "msg_confirm_uninstall",
+            "Are you sure you want to uninstall {app_name}?",
+        );
+        defaults.insert(
+            "msg_install_complete",
+            "{app_name} has been successfully installed.",
+        );
+        defaults.insert(
+            "msg_uninstall_complete",
+            "{app_name} has been successfully removed.",
+        );
         defaults.insert("msg_install_failed", "Installation failed. Error: {error}");
-        defaults.insert("msg_disk_space", "Not enough disk space. Required: {required}, Available: {available}");
-        defaults.insert("msg_app_running", "{app_name} is currently running. Please close it before continuing.");
-        defaults.insert("msg_elevation_required", "Administrator privileges are required to install this application.");
+        defaults.insert(
+            "msg_disk_space",
+            "Not enough disk space. Required: {required}, Available: {available}",
+        );
+        defaults.insert(
+            "msg_app_running",
+            "{app_name} is currently running. Please close it before continuing.",
+        );
+        defaults.insert(
+            "msg_elevation_required",
+            "Administrator privileges are required to install this application.",
+        );
         defaults.insert("msg_extracting", "Extracting files...");
         defaults.insert("msg_creating_shortcuts", "Creating shortcuts...");
         defaults.insert("msg_writing_registry", "Writing registry entries...");
@@ -102,7 +144,11 @@ impl Localizer {
         }
 
         // If the current language has overrides, apply them
-        if let Some(lang) = config.languages.iter().find(|l| l.code == config.default_language) {
+        if let Some(lang) = config
+            .languages
+            .iter()
+            .find(|l| l.code == config.default_language)
+        {
             for (key, value) in &lang.strings {
                 overrides.insert(key.clone(), value.clone());
             }
@@ -127,7 +173,9 @@ impl Localizer {
     /// with values from the `vars` slice (key-value pairs).
     pub fn get(&self, key: &str, vars: &[(&str, &str)]) -> String {
         // Look up: overrides first, then defaults
-        let template = self.overrides.get(key)
+        let template = self
+            .overrides
+            .get(key)
             .map(|s| s.as_str())
             .or_else(|| self.defaults.get(key).copied())
             .unwrap_or(key);
@@ -204,10 +252,22 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_no".into(), "&Nein".into());
                 m.insert("wizard_welcome_title".into(), "Willkommen".into());
                 m.insert("wizard_install_title".into(), "Installation".into());
-                m.insert("wizard_finish_title".into(), "Installation abgeschlossen".into());
-                m.insert("msg_confirm_cancel".into(), "Moechten Sie die Installation wirklich abbrechen?".into());
-                m.insert("msg_extracting".into(), "Dateien werden extrahiert...".into());
-                m.insert("msg_install_complete".into(), "{app_name} wurde erfolgreich installiert.".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "Installation abgeschlossen".into(),
+                );
+                m.insert(
+                    "msg_confirm_cancel".into(),
+                    "Moechten Sie die Installation wirklich abbrechen?".into(),
+                );
+                m.insert(
+                    "msg_extracting".into(),
+                    "Dateien werden extrahiert...".into(),
+                );
+                m.insert(
+                    "msg_install_complete".into(),
+                    "{app_name} wurde erfolgreich installiert.".into(),
+                );
                 m
             },
         },
@@ -227,9 +287,15 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("wizard_welcome_title".into(), "Bienvenue".into());
                 m.insert("wizard_install_title".into(), "Installation".into());
                 m.insert("wizard_finish_title".into(), "Installation terminee".into());
-                m.insert("msg_confirm_cancel".into(), "Voulez-vous vraiment annuler l'installation?".into());
+                m.insert(
+                    "msg_confirm_cancel".into(),
+                    "Voulez-vous vraiment annuler l'installation?".into(),
+                );
                 m.insert("msg_extracting".into(), "Extraction des fichiers...".into());
-                m.insert("msg_install_complete".into(), "{app_name} a ete installe avec succes.".into());
+                m.insert(
+                    "msg_install_complete".into(),
+                    "{app_name} a ete installe avec succes.".into(),
+                );
                 m
             },
         },
@@ -248,10 +314,19 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_no".into(), "&No".into());
                 m.insert("wizard_welcome_title".into(), "Bienvenido".into());
                 m.insert("wizard_install_title".into(), "Instalacion".into());
-                m.insert("wizard_finish_title".into(), "Instalacion completada".into());
-                m.insert("msg_confirm_cancel".into(), "Esta seguro de que desea cancelar la instalacion?".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "Instalacion completada".into(),
+                );
+                m.insert(
+                    "msg_confirm_cancel".into(),
+                    "Esta seguro de que desea cancelar la instalacion?".into(),
+                );
                 m.insert("msg_extracting".into(), "Extrayendo archivos...".into());
-                m.insert("msg_install_complete".into(), "{app_name} se ha instalado correctamente.".into());
+                m.insert(
+                    "msg_install_complete".into(),
+                    "{app_name} se ha instalado correctamente.".into(),
+                );
                 m
             },
         },
@@ -341,10 +416,19 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_no".into(), "&No".into());
                 m.insert("wizard_welcome_title".into(), "Benvenuto".into());
                 m.insert("wizard_install_title".into(), "Installazione".into());
-                m.insert("wizard_finish_title".into(), "Installazione completata".into());
-                m.insert("msg_confirm_cancel".into(), "Si desidera annullare l'installazione?".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "Installazione completata".into(),
+                );
+                m.insert(
+                    "msg_confirm_cancel".into(),
+                    "Si desidera annullare l'installazione?".into(),
+                );
                 m.insert("msg_extracting".into(), "Estrazione file...".into());
-                m.insert("msg_install_complete".into(), "{app_name} e stato installato correttamente.".into());
+                m.insert(
+                    "msg_install_complete".into(),
+                    "{app_name} e stato installato correttamente.".into(),
+                );
                 m
             },
         },
@@ -382,9 +466,15 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("wizard_welcome_title".into(), "Добро пожаловать".into());
                 m.insert("wizard_install_title".into(), "Установка".into());
                 m.insert("wizard_finish_title".into(), "Установка завершена".into());
-                m.insert("msg_confirm_cancel".into(), "Вы действительно хотите отменить установку?".into());
+                m.insert(
+                    "msg_confirm_cancel".into(),
+                    "Вы действительно хотите отменить установку?".into(),
+                );
                 m.insert("msg_extracting".into(), "Распаковка файлов...".into());
-                m.insert("msg_install_complete".into(), "{app_name} успешно установлен.".into());
+                m.insert(
+                    "msg_install_complete".into(),
+                    "{app_name} успешно установлен.".into(),
+                );
                 m
             },
         },
@@ -419,7 +509,10 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_browse".into(), "&Blaeddra...".into());
                 m.insert("wizard_welcome_title".into(), "Valkommen".into());
                 m.insert("wizard_install_title".into(), "Installation".into());
-                m.insert("wizard_finish_title".into(), "Installationen ar klar".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "Installationen ar klar".into(),
+                );
                 m.insert("msg_extracting".into(), "Packar upp filer...".into());
                 m
             },
@@ -490,7 +583,10 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_cancel".into(), "Megse".into());
                 m.insert("wizard_welcome_title".into(), "Udvozoljuk".into());
                 m.insert("wizard_install_title".into(), "Telepites".into());
-                m.insert("wizard_finish_title".into(), "A telepites befejezodott".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "A telepites befejezodott".into(),
+                );
                 m.insert("msg_extracting".into(), "Fajlok kibontasa...".into());
                 m
             },
@@ -526,7 +622,10 @@ pub fn builtin_language_packs() -> Vec<LanguageEntry> {
                 m.insert("btn_browse".into(), "&Огляд...".into());
                 m.insert("wizard_welcome_title".into(), "Ласкаво просимо".into());
                 m.insert("wizard_install_title".into(), "Встановлення".into());
-                m.insert("wizard_finish_title".into(), "Встановлення завершено".into());
+                m.insert(
+                    "wizard_finish_title".into(),
+                    "Встановлення завершено".into(),
+                );
                 m.insert("msg_extracting".into(), "Розпакування файлів...".into());
                 m
             },
@@ -590,10 +689,10 @@ mod tests {
     #[test]
     fn test_multiple_variables() {
         let loc = Localizer::defaults_only();
-        let result = loc.get("msg_disk_space", &[
-            ("required", "500 MB"),
-            ("available", "200 MB"),
-        ]);
+        let result = loc.get(
+            "msg_disk_space",
+            &[("required", "500 MB"), ("available", "200 MB")],
+        );
         assert!(result.contains("500 MB"));
         assert!(result.contains("200 MB"));
     }
@@ -607,7 +706,9 @@ mod tests {
     #[test]
     fn test_override_strings() {
         let mut config = LocalizationConfig::default();
-        config.strings.insert("btn_next".to_string(), "Continue >>".to_string());
+        config
+            .strings
+            .insert("btn_next".to_string(), "Continue >>".to_string());
         let loc = Localizer::new(&config);
         assert_eq!(loc.get_simple("btn_next"), "Continue >>");
     }

@@ -41,11 +41,17 @@ pub fn install_dependencies(
     sorted.sort_by_key(|d| d.priority);
 
     for dep in &sorted {
-        info!("Processing dependency: {} (priority: {})", dep.name, dep.priority);
+        info!(
+            "Processing dependency: {} (priority: {})",
+            dep.name, dep.priority
+        );
 
         // Evaluate condition
         if !dep_resolver::evaluate_condition(&dep.condition) {
-            logging::log(&format!("Skipping {} (condition not met: {})", dep.name, dep.condition));
+            logging::log(&format!(
+                "Skipping {} (condition not met: {})",
+                dep.name, dep.condition
+            ));
             results.push(DepInstallResult {
                 name: dep.name.clone(),
                 installed: false,
@@ -92,7 +98,8 @@ pub fn install_dependencies(
 
         // Install
         logging::log(&format!("Installing {}...", dep.name));
-        let install_result = execute_installer(&file_path, &dep.install_args, &dep.file_type, temp_dir);
+        let install_result =
+            execute_installer(&file_path, &dep.install_args, &dep.file_type, temp_dir);
 
         match install_result {
             Ok(()) => {
@@ -149,11 +156,17 @@ pub fn install_bundled_apps(
     sorted.sort_by_key(|b| b.priority);
 
     for app in &sorted {
-        info!("Processing bundled app: {} (priority: {})", app.name, app.priority);
+        info!(
+            "Processing bundled app: {} (priority: {})",
+            app.name, app.priority
+        );
 
         // Evaluate condition
         if !dep_resolver::evaluate_condition(&app.condition) {
-            logging::log(&format!("Skipping {} (condition not met: {})", app.name, app.condition));
+            logging::log(&format!(
+                "Skipping {} (condition not met: {})",
+                app.name, app.condition
+            ));
             results.push(DepInstallResult {
                 name: app.name.clone(),
                 installed: false,
@@ -211,7 +224,12 @@ pub fn install_bundled_apps(
 
         // Install
         logging::log(&format!("Installing bundled app: {}...", app.name));
-        let result = execute_installer_with_workdir(&installer_path, &app.install_args, &file_type, &work_dir);
+        let result = execute_installer_with_workdir(
+            &installer_path,
+            &app.install_args,
+            &file_type,
+            &work_dir,
+        );
 
         match result {
             Ok(()) => {
@@ -258,17 +276,16 @@ fn download_dependency(dep: &DependencyEntry, temp_dir: &Path) -> Result<PathBuf
     let deps_dir = temp_dir.join("velocity_deps");
     std::fs::create_dir_all(&deps_dir)?;
 
-    downloader::download_file(
-        &dep.url,
-        &deps_dir,
-        None,
-        dep.sha256.as_deref(),
-        None,
-    )
+    downloader::download_file(&dep.url, &deps_dir, None, dep.sha256.as_deref(), None)
 }
 
 /// Execute an installer with the given arguments.
-fn execute_installer(installer_path: &Path, args: &str, file_type: &str, work_dir: &Path) -> Result<()> {
+fn execute_installer(
+    installer_path: &Path,
+    args: &str,
+    file_type: &str,
+    work_dir: &Path,
+) -> Result<()> {
     execute_installer_with_workdir(installer_path, args, file_type, work_dir)
 }
 
@@ -301,22 +318,26 @@ fn execute_installer_with_workdir(
                     debug!("Installer exited with code {} (acceptable)", code);
                     Ok(())
                 } else {
-                    Err(CoreError::other("installer execution", format!(
-                        "Installer exited with code {}",
-                        code
-                    )))
+                    Err(CoreError::other(
+                        "installer execution",
+                        format!("Installer exited with code {}", code),
+                    ))
                 }
             }
         }
-        Err(e) => Err(CoreError::other("installer execution", format!(
-            "Failed to execute installer: {}",
-            e
-        ))),
+        Err(e) => Err(CoreError::other(
+            "installer execution",
+            format!("Failed to execute installer: {}", e),
+        )),
     }
 }
 
 /// Build the command line for executing an installer based on file type.
-fn build_command_line(installer_path: &Path, args: &str, file_type: &str) -> Result<(String, Vec<String>)> {
+fn build_command_line(
+    installer_path: &Path,
+    args: &str,
+    file_type: &str,
+) -> Result<(String, Vec<String>)> {
     let path_str = installer_path.to_string_lossy().to_string();
 
     match file_type.to_lowercase().as_str() {
@@ -391,7 +412,7 @@ fn is_acceptable_exit_code(code: i32) -> bool {
         | 1641 // MSI: success, reboot initiated
         | 1605 // MSI: product not installed (uninstall context)
         | 1638 // MSI: product is already installed
-        | 1   // Generic "already installed" for some NSIS installers
+        | 1 // Generic "already installed" for some NSIS installers
     )
 }
 
@@ -434,12 +455,8 @@ mod tests {
 
     #[test]
     fn test_build_command_line_msi() {
-        let (prog, args) = build_command_line(
-            Path::new("C:\\temp\\setup.msi"),
-            "ADDLOCAL=ALL",
-            "msi",
-        )
-        .unwrap();
+        let (prog, args) =
+            build_command_line(Path::new("C:\\temp\\setup.msi"), "ADDLOCAL=ALL", "msi").unwrap();
         assert_eq!(prog, "msiexec.exe");
         assert!(args.contains(&"/i".to_string()));
         assert!(args.contains(&"/qn".to_string()));
@@ -449,12 +466,8 @@ mod tests {
 
     #[test]
     fn test_build_command_line_exe() {
-        let (prog, args) = build_command_line(
-            Path::new("C:\\temp\\setup.exe"),
-            "/S /v/qn",
-            "exe",
-        )
-        .unwrap();
+        let (prog, args) =
+            build_command_line(Path::new("C:\\temp\\setup.exe"), "/S /v/qn", "exe").unwrap();
         assert_eq!(prog, "C:\\temp\\setup.exe");
         assert_eq!(args, vec!["/S", "/v/qn"]);
     }
@@ -472,18 +485,16 @@ mod tests {
 
     #[test]
     fn test_all_required_installed() {
-        let deps = vec![
-            DependencyEntry {
-                name: "VC++".to_string(),
-                url: "https://example.com/vc.exe".to_string(),
-                sha256: None,
-                install_args: "/S".to_string(),
-                condition: "always".to_string(),
-                priority: 100,
-                required: true,
-                file_type: "exe".to_string(),
-            },
-        ];
+        let deps = vec![DependencyEntry {
+            name: "VC++".to_string(),
+            url: "https://example.com/vc.exe".to_string(),
+            sha256: None,
+            install_args: "/S".to_string(),
+            condition: "always".to_string(),
+            priority: 100,
+            required: true,
+            file_type: "exe".to_string(),
+        }];
         let results = vec![DepInstallResult {
             name: "VC++".to_string(),
             installed: true,

@@ -28,13 +28,15 @@ pub enum RebootStatus {
 ///
 /// Checks the Session Manager registry key for PendingFileRenameOperations.
 pub fn is_reboot_pending() -> bool {
-    use winreg::RegKey;
     use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok(key) = hklm.open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager") {
         // Check for PendingFileRenameOperations
-        if key.get_raw_value("PendingFileRenameOperations").is_ok() { return true }
+        if key.get_raw_value("PendingFileRenameOperations").is_ok() {
+            return true;
+        }
 
         // Also check the RebootRequired flag
         if let Ok(flag) = key.get_value::<u32, _>("RebootRequired") {
@@ -49,8 +51,8 @@ pub fn is_reboot_pending() -> bool {
 
 /// Check if this installer session has requested a reboot.
 pub fn is_velocity_reboot_requested() -> bool {
-    use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(key) = hkcu.open_subkey(r"SOFTWARE\Velocity\Installer") {
@@ -64,13 +66,14 @@ pub fn is_velocity_reboot_requested() -> bool {
 
 /// Mark that a reboot is required by this installer.
 pub fn request_reboot(app_name: &str) -> Result<()> {
-    use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
 
     info!("Reboot requested by installer for: {}", app_name);
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = hkcu.create_subkey(r"SOFTWARE\Velocity\Installer")
+    let (key, _) = hkcu
+        .create_subkey(r"SOFTWARE\Velocity\Installer")
         .map_err(|e| CoreError::other("reboot", format!("Failed to create registry key: {}", e)))?;
 
     key.set_value("RebootRequested", &1u32)
@@ -84,14 +87,13 @@ pub fn request_reboot(app_name: &str) -> Result<()> {
 
 /// Clear the reboot request flag.
 pub fn clear_reboot_request() -> Result<()> {
-    use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    if let Ok(key) = hkcu.open_subkey_with_flags(
-        r"SOFTWARE\Velocity\Installer",
-        winreg::enums::KEY_SET_VALUE,
-    ) {
+    if let Ok(key) =
+        hkcu.open_subkey_with_flags(r"SOFTWARE\Velocity\Installer", winreg::enums::KEY_SET_VALUE)
+    {
         let _ = key.delete_value("RebootRequested");
         let _ = key.delete_value("RebootApp");
     }
@@ -131,30 +133,40 @@ pub fn schedule_file_rename_on_reboot(source: &Path, destination: &Path) -> Resu
 /// null-terminated strings: [source\0, destination\0, ...].
 /// If destination is empty, the source is deleted on reboot.
 fn append_pending_rename(source: &str, destination: &str) -> Result<()> {
-    use winreg::RegKey;
     use winreg::enums::*;
+    use winreg::RegKey;
     use winreg::RegValue;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let key = hklm.open_subkey_with_flags(
-        r"SYSTEM\CurrentControlSet\Control\Session Manager",
-        KEY_READ | KEY_WRITE,
-    ).map_err(|e| CoreError::other("reboot", format!(
-        "Failed to open Session Manager key: {}. Admin privileges may be required.", e
-    )))?;
+    let key = hklm
+        .open_subkey_with_flags(
+            r"SYSTEM\CurrentControlSet\Control\Session Manager",
+            KEY_READ | KEY_WRITE,
+        )
+        .map_err(|e| {
+            CoreError::other(
+                "reboot",
+                format!(
+                    "Failed to open Session Manager key: {}. Admin privileges may be required.",
+                    e
+                ),
+            )
+        })?;
 
     // Read existing entries
     let mut existing: Vec<String> = match key.get_raw_value("PendingFileRenameOperations") {
         Ok(reg_value) => {
             if reg_value.vtype == REG_MULTI_SZ {
                 // Decode REG_MULTI_SZ: bytes are null-separated strings, terminated by double null
-                let bytes: Vec<u16> = reg_value.bytes
+                let bytes: Vec<u16> = reg_value
+                    .bytes
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
                     .collect();
 
                 let full_string = String::from_utf16_lossy(&bytes);
-                full_string.split('\0')
+                full_string
+                    .split('\0')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
                     .collect()
@@ -177,9 +189,7 @@ fn append_pending_rename(source: &str, destination: &str) -> Result<()> {
     }
     encoded.push(0); // final null terminator
 
-    let bytes: Vec<u8> = encoded.iter()
-        .flat_map(|w| w.to_le_bytes())
-        .collect();
+    let bytes: Vec<u8> = encoded.iter().flat_map(|w| w.to_le_bytes()).collect();
 
     let reg_value = RegValue {
         vtype: REG_MULTI_SZ,
@@ -187,11 +197,17 @@ fn append_pending_rename(source: &str, destination: &str) -> Result<()> {
     };
 
     key.set_raw_value("PendingFileRenameOperations", &reg_value)
-        .map_err(|e| CoreError::other("reboot", format!(
-            "Failed to update PendingFileRenameOperations: {}", e
-        )))?;
+        .map_err(|e| {
+            CoreError::other(
+                "reboot",
+                format!("Failed to update PendingFileRenameOperations: {}", e),
+            )
+        })?;
 
-    debug!("Appended to PendingFileRenameOperations: {} -> {}", source, destination);
+    debug!(
+        "Appended to PendingFileRenameOperations: {} -> {}",
+        source, destination
+    );
     Ok(())
 }
 
@@ -207,7 +223,9 @@ pub fn request_system_reboot() -> Result<bool> {
     let output = std::process::Command::new("shutdown")
         .args(["/r", "/t", "0", "/d", "p:4:1"])
         .output()
-        .map_err(|e| CoreError::other("reboot", format!("Failed to run shutdown command: {}", e)))?;
+        .map_err(|e| {
+            CoreError::other("reboot", format!("Failed to run shutdown command: {}", e))
+        })?;
 
     if output.status.success() {
         info!("System reboot initiated");
@@ -215,9 +233,13 @@ pub fn request_system_reboot() -> Result<bool> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         warn!("Failed to initiate reboot: {}", stderr);
-        Err(CoreError::other("reboot", format!(
-            "Failed to initiate reboot: {}. Administrator privileges may be required.", stderr
-        )))
+        Err(CoreError::other(
+            "reboot",
+            format!(
+                "Failed to initiate reboot: {}. Administrator privileges may be required.",
+                stderr
+            ),
+        ))
     }
 }
 
@@ -249,7 +271,8 @@ pub fn is_file_locked(path: &Path) -> bool {
 ///
 /// Returns a list of locked file paths.
 pub fn find_locked_files(paths: &[&Path]) -> Vec<std::path::PathBuf> {
-    paths.iter()
+    paths
+        .iter()
         .filter(|p| is_file_locked(p))
         .map(|p| (*p).to_path_buf())
         .collect()
@@ -267,7 +290,9 @@ mod tests {
 
     #[test]
     fn test_is_file_locked_nonexistent() {
-        assert!(!is_file_locked(Path::new("C:\\nonexistent_file_xyz_123.dll")));
+        assert!(!is_file_locked(Path::new(
+            "C:\\nonexistent_file_xyz_123.dll"
+        )));
     }
 
     #[test]

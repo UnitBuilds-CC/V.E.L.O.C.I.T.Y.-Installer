@@ -100,7 +100,12 @@ fn validate_manifest(manifest: &VelocityManifest) -> Result<()> {
             )));
         }
         // Service name must be safe (alphanumeric, underscore, hyphen, dot)
-        if svc.name.is_empty() || !svc.name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        if svc.name.is_empty()
+            || !svc
+                .name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+        {
             return Err(ConfigError::Validation(format!(
                 "Invalid service name '{}'. Must contain only alphanumeric characters, underscores, hyphens, or dots.",
                 svc.name
@@ -232,11 +237,14 @@ add_remove = true
         let manifest = parse_manifest_str(toml).unwrap();
         let serialized = serialize_manifest(&manifest).unwrap();
         let reparsed = parse_manifest_str(&serialized).unwrap();
-        
+
         assert_eq!(manifest.app.name, reparsed.app.name);
         assert_eq!(manifest.app.version, reparsed.app.version);
         assert_eq!(manifest.app.publisher, reparsed.app.publisher);
-        assert_eq!(manifest.install.require_admin, reparsed.install.require_admin);
+        assert_eq!(
+            manifest.install.require_admin,
+            reparsed.install.require_admin
+        );
         assert_eq!(manifest.shortcuts.desktop, reparsed.shortcuts.desktop);
     }
 

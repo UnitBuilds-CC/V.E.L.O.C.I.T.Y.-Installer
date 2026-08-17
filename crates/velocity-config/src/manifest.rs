@@ -170,8 +170,7 @@ impl Default for InstallConfig {
 }
 
 /// File inclusion configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FilesConfig {
     /// Glob pattern(s) for source files to include
     #[serde(default)]
@@ -187,7 +186,6 @@ pub struct FilesConfig {
     pub exclude: Vec<String>,
 }
 
-
 /// Explicit source-to-destination file mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMapping {
@@ -198,8 +196,7 @@ pub struct FileMapping {
 }
 
 /// Shortcut creation settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ShortcutConfig {
     /// Create a desktop shortcut
     #[serde(default)]
@@ -214,7 +211,6 @@ pub struct ShortcutConfig {
     #[serde(default)]
     pub custom: Vec<CustomShortcut>,
 }
-
 
 /// A custom shortcut definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,8 +350,7 @@ pub struct PageConfig {
 }
 
 /// Pre/post install script configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScriptsConfig {
     /// Commands to run before installation (simple shell commands)
     #[serde(default)]
@@ -438,7 +433,6 @@ pub struct ScriptActionConfig {
 fn default_error_policy() -> String {
     "abort".to_string()
 }
-
 
 /// Environment variable to set during installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

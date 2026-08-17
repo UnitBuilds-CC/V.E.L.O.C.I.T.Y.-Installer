@@ -1,8 +1,8 @@
 //! High-level wizard orchestrator — selects and runs the appropriate UI theme.
 
 use crate::classic;
+use crate::error::{Result, UiError};
 use crate::native_wizard;
-use crate::error::{UiError, Result};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -142,12 +142,19 @@ impl ProgressTracker {
             let total_secs = elapsed_ms / 1000;
             tracing::info!(
                 "Progress: [{}/{}] 100% - {} (completed in {}s)",
-                current, self.total_items, display_name, total_secs
+                current,
+                self.total_items,
+                display_name,
+                total_secs
             );
         } else if current.is_multiple_of(10) || current <= 5 {
             tracing::info!(
                 "Progress: [{}/{}] {}% - {} ETA: {}",
-                current, self.total_items, pct, display_name, eta_str
+                current,
+                self.total_items,
+                pct,
+                display_name,
+                eta_str
             );
         }
 
@@ -178,7 +185,10 @@ impl ProgressTracker {
 
     /// Get current progress as a fraction.
     pub fn progress(&self) -> (u64, u64) {
-        (self.completed_items.load(Ordering::Relaxed), self.total_items)
+        (
+            self.completed_items.load(Ordering::Relaxed),
+            self.total_items,
+        )
     }
 }
 

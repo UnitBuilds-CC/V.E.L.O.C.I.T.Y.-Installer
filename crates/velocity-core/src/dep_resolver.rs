@@ -48,12 +48,16 @@ mod tests {
 
     #[test]
     fn test_file_missing_condition() {
-        assert!(evaluate_condition("file_missing:C:\\nonexistent_file_xyz.dll"));
+        assert!(evaluate_condition(
+            "file_missing:C:\\nonexistent_file_xyz.dll"
+        ));
     }
 
     #[test]
     fn test_file_exists_condition() {
-        assert!(evaluate_condition("file_exists:C:\\Windows\\System32\\kernel32.dll"));
+        assert!(evaluate_condition(
+            "file_exists:C:\\Windows\\System32\\kernel32.dll"
+        ));
     }
 
     #[test]
@@ -64,16 +68,10 @@ mod tests {
 
     #[test]
     fn test_evaluate_all_conditions() {
-        let conditions = vec![
-            "always".to_string(),
-            "file_exists:C:\\Windows".to_string(),
-        ];
+        let conditions = vec!["always".to_string(), "file_exists:C:\\Windows".to_string()];
         assert!(evaluate_all_conditions(&conditions));
 
-        let conditions_with_false = vec![
-            "always".to_string(),
-            "never".to_string(),
-        ];
+        let conditions_with_false = vec!["always".to_string(), "never".to_string()];
         assert!(!evaluate_all_conditions(&conditions_with_false));
     }
 }

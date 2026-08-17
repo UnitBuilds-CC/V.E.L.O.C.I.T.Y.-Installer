@@ -41,8 +41,18 @@ pub fn run(config_path: &str) -> Result<()> {
 
     println!("  Configuration is valid!");
     println!();
-    println!("  App:      {} v{}", manifest.app.name, manifest.app.version);
-    println!("  Publisher: {}", if manifest.app.publisher.is_empty() { "(not set)" } else { &manifest.app.publisher });
+    println!(
+        "  App:      {} v{}",
+        manifest.app.name, manifest.app.version
+    );
+    println!(
+        "  Publisher: {}",
+        if manifest.app.publisher.is_empty() {
+            "(not set)"
+        } else {
+            &manifest.app.publisher
+        }
+    );
     println!("  Theme:    {}", manifest.ui.theme);
     println!("  Arch:     {}", manifest.install.arch);
     println!("  Admin:    {}", manifest.install.require_admin);
@@ -56,9 +66,21 @@ pub fn run(config_path: &str) -> Result<()> {
     // Check that variables in default_dir are known
     let vars = velocity_config::extract_variables(&manifest.install.default_dir);
     let known_vars = [
-        "app", "autopf", "autopf64", "autopf32", "commonstartup",
-        "autodesktop", "autostartmenu", "autoprograms", "win", "sys",
-        "tmp", "src", "home", "group", "version",
+        "app",
+        "autopf",
+        "autopf64",
+        "autopf32",
+        "commonstartup",
+        "autodesktop",
+        "autostartmenu",
+        "autoprograms",
+        "win",
+        "sys",
+        "tmp",
+        "src",
+        "home",
+        "group",
+        "version",
     ];
     for var in &vars {
         if !known_vars.contains(&var.as_str()) {
@@ -72,12 +94,15 @@ pub fn run(config_path: &str) -> Result<()> {
             if files.is_empty() {
                 errors.push("No files found matching source patterns".to_string());
             } else {
-                let total_size: u64 = files.iter()
+                let total_size: u64 = files
+                    .iter()
                     .filter_map(|(p, _)| std::fs::metadata(p).ok().map(|m| m.len()))
                     .sum();
-                println!("  Files:    {} file(s), {} total",
+                println!(
+                    "  Files:    {} file(s), {} total",
                     files.len(),
-                    format_size(total_size));
+                    format_size(total_size)
+                );
             }
         }
         Err(e) => {
@@ -91,7 +116,8 @@ pub fn run(config_path: &str) -> Result<()> {
         if !valid_roots.contains(&entry.root.as_str()) {
             errors.push(format!(
                 "Registry entry #{}: invalid root '{}' (must be one of: HKLM, HKCU, HKCR, HKU)",
-                i + 1, entry.root
+                i + 1,
+                entry.root
             ));
         }
         if entry.key.is_empty() {
@@ -135,10 +161,13 @@ pub fn run(config_path: &str) -> Result<()> {
 
     // Step 7: Validate file associations
     for (i, assoc) in manifest.file_associations.iter().enumerate() {
-        if !assoc.extension.starts_with('.') && !assoc.extension.chars().all(|c| c.is_alphanumeric()) {
+        if !assoc.extension.starts_with('.')
+            && !assoc.extension.chars().all(|c| c.is_alphanumeric())
+        {
             warnings.push(format!(
                 "File association #{}: extension '{}' may need a leading dot",
-                i + 1, assoc.extension
+                i + 1,
+                assoc.extension
             ));
         }
         if assoc.handler.is_empty() {
@@ -159,7 +188,10 @@ pub fn run(config_path: &str) -> Result<()> {
     if let Some(ref license_path) = manifest.app.license {
         let full_license = project_dir.join(license_path);
         if !full_license.exists() {
-            warnings.push(format!("License file not found: {}", full_license.display()));
+            warnings.push(format!(
+                "License file not found: {}",
+                full_license.display()
+            ));
         }
     }
 
@@ -181,13 +213,19 @@ pub fn run(config_path: &str) -> Result<()> {
             println!("    ✗ {}", e);
         }
         println!();
-        anyhow::bail!("Configuration validation failed with {} error(s)", errors.len());
+        anyhow::bail!(
+            "Configuration validation failed with {} error(s)",
+            errors.len()
+        );
     }
 
     if warnings.is_empty() {
         println!("  All checks passed. Ready to build!");
     } else {
-        println!("  Configuration is valid (with {} warning(s)).", warnings.len());
+        println!(
+            "  Configuration is valid (with {} warning(s)).",
+            warnings.len()
+        );
     }
     println!();
 

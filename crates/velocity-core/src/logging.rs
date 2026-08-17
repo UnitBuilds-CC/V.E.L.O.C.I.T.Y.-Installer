@@ -16,32 +16,40 @@ static LOGGER: Mutex<Option<InstallLogger>> = Mutex::new(None);
 pub fn init_logger(log_dir: &Path, app_name: &str) -> Result<PathBuf> {
     let log_path = log_dir.join(format!("{}_install.log", sanitize_filename(app_name)));
     let logger = InstallLogger::new(&log_path)?;
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
+    let mut guard = LOGGER
+        .lock()
+        .map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     *guard = Some(logger);
     Ok(log_path)
 }
 
 /// Initialize a temporary logger (before install dir is known).
 pub fn init_temp_logger(app_name: &str) -> Result<PathBuf> {
-    let log_path = std::env::temp_dir().join(format!("{}_install.log", sanitize_filename(app_name)));
+    let log_path =
+        std::env::temp_dir().join(format!("{}_install.log", sanitize_filename(app_name)));
     let logger = InstallLogger::new(&log_path)?;
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
+    let mut guard = LOGGER
+        .lock()
+        .map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     *guard = Some(logger);
     Ok(log_path)
 }
 
 /// Move the log file to the final install directory.
 pub fn move_log_to_install_dir(install_dir: &Path, app_name: &str) -> Result<PathBuf> {
-    let temp_log = std::env::temp_dir().join(format!("{}_install.log", sanitize_filename(app_name)));
+    let temp_log =
+        std::env::temp_dir().join(format!("{}_install.log", sanitize_filename(app_name)));
     let final_log = install_dir.join(format!("{}_install.log", sanitize_filename(app_name)));
-    
+
     if temp_log.exists() {
         std::fs::copy(&temp_log, &final_log)?;
         let _ = std::fs::remove_file(&temp_log);
     }
-    
+
     // Update the logger to point to the new location
-    let mut guard = LOGGER.lock().map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
+    let mut guard = LOGGER
+        .lock()
+        .map_err(|e| CoreError::other("logger lock", format!("{}", e)))?;
     if let Some(ref mut logger) = *guard {
         logger.file = OpenOptions::new()
             .create(true)
@@ -49,7 +57,7 @@ pub fn move_log_to_install_dir(install_dir: &Path, app_name: &str) -> Result<Pat
             .open(&final_log)?;
         logger.log_path = final_log.clone();
     }
-    
+
     Ok(final_log)
 }
 
@@ -109,13 +117,21 @@ pub fn log_success(message: &str) {
 
 /// Get the current log file path.
 pub fn log_path() -> Option<PathBuf> {
-    LOGGER.lock().ok()
+    LOGGER
+        .lock()
+        .ok()
         .and_then(|guard| guard.as_ref().map(|l| l.log_path.clone()))
 }
 
 fn sanitize_filename(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -139,14 +155,17 @@ impl InstallLogger {
             .write(true)
             .truncate(true)
             .open(path)?;
-        
+
         writeln!(file, "=== Velocity Installer Log ===")?;
         writeln!(file, "Timestamp: {}", timestamp())?;
         writeln!(file, "================================")?;
-        
-        Ok(Self { file, log_path: path.to_path_buf() })
+
+        Ok(Self {
+            file,
+            log_path: path.to_path_buf(),
+        })
     }
-    
+
     fn write_entry(&mut self, message: &str) -> std::io::Result<()> {
         writeln!(self.file, "[{}] {}", timestamp(), message)
     }

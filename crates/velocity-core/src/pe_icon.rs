@@ -79,11 +79,16 @@ fn set_icon_reshack(reshack: &str, exe_path: &Path, icon_path: &Path) -> Result<
     // -open exe -save exe -action addoverwrite -res ico -mask ICONGROUP,1,
     let output = Command::new(reshack)
         .args([
-            "-open", &exe_path.to_string_lossy(),
-            "-save", &exe_path.to_string_lossy(),
-            "-action", "addoverwrite",
-            "-res", &icon_path.to_string_lossy(),
-            "-mask", "ICONGROUP,1,",
+            "-open",
+            &exe_path.to_string_lossy(),
+            "-save",
+            &exe_path.to_string_lossy(),
+            "-action",
+            "addoverwrite",
+            "-res",
+            &icon_path.to_string_lossy(),
+            "-mask",
+            "ICONGROUP,1,",
         ])
         .output()
         .map_err(|e| CoreError::Other(format!("Failed to run Resource Hacker: {}", e)))?;
@@ -93,7 +98,10 @@ fn set_icon_reshack(reshack: &str, exe_path: &Path, icon_path: &Path) -> Result<
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(CoreError::Other(format!("Resource Hacker failed: {}", stderr)))
+        Err(CoreError::Other(format!(
+            "Resource Hacker failed: {}",
+            stderr
+        )))
     }
 }
 
@@ -110,10 +118,7 @@ fn find_rcedit() -> Option<String> {
     }
 
     // Check common locations
-    let candidates = [
-        "C:\\tools\\rcedit-x64.exe",
-        "C:\\tools\\rcedit.exe",
-    ];
+    let candidates = ["C:\\tools\\rcedit-x64.exe", "C:\\tools\\rcedit.exe"];
     for path in &candidates {
         if Path::new(path).exists() {
             return Some(path.to_string());
@@ -163,7 +168,9 @@ pub fn set_exe_version_info(
         cmd.arg("--set-version-string").arg("CompanyName").arg(c);
     }
     if let Some(d) = description {
-        cmd.arg("--set-version-string").arg("FileDescription").arg(d);
+        cmd.arg("--set-version-string")
+            .arg("FileDescription")
+            .arg(d);
     }
     if let Some(c) = copyright {
         cmd.arg("--set-version-string").arg("LegalCopyright").arg(c);

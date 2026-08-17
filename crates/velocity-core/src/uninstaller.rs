@@ -1,10 +1,10 @@
 //! Uninstaller generation — creates a self-contained uninstall executable.
 
 use crate::error::{CoreError, Result};
-use crate::registry;
-use crate::shortcuts;
 use crate::file_assoc;
 use crate::logging;
+use crate::registry;
+use crate::shortcuts;
 use std::path::Path;
 use tracing::info;
 use velocity_config::VelocityManifest;
@@ -75,9 +75,7 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
     // Run pre-uninstall scripts
     for cmd in &info.pre_uninstall {
         logging::log_op("SCRIPT", cmd);
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", cmd])
-            .output();
+        let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
     }
 
     // Stop and remove services
@@ -130,11 +128,21 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
 
             if entry.file_type().is_file() {
                 // Don't delete the uninstaller itself until the end
-                if entry.path().file_name().map(|n| n == "uninstall.exe").unwrap_or(false) {
+                if entry
+                    .path()
+                    .file_name()
+                    .map(|n| n == "uninstall.exe")
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 // Don't delete the log file until the end
-                if entry.path().extension().map(|e| e == "log").unwrap_or(false) {
+                if entry
+                    .path()
+                    .extension()
+                    .map(|e| e == "log")
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 if std::fs::remove_file(entry.path()).is_ok() {
@@ -153,16 +161,14 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
 
         // Try to remove the install directory itself
         std::fs::remove_dir(install_dir).ok();
-        
+
         logging::log_success(&format!("Removed {} files", file_count));
     }
 
     // Run post-uninstall scripts
     for cmd in &info.post_uninstall {
         logging::log_op("SCRIPT", cmd);
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", cmd])
-            .output();
+        let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
     }
 
     logging::log_success(&format!("Uninstallation complete: {}", info.app_name));

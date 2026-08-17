@@ -26,9 +26,17 @@ pub enum ActionType {
     /// Delete a directory (recursive)
     DeleteDir(String),
     /// Write a registry value
-    WriteRegistry { key: String, name: String, value: String },
+    WriteRegistry {
+        key: String,
+        name: String,
+        value: String,
+    },
     /// Set an environment variable
-    SetEnvVar { name: String, value: String, scope: String },
+    SetEnvVar {
+        name: String,
+        value: String,
+        scope: String,
+    },
 }
 
 /// Error handling policy for an action.
@@ -137,14 +145,21 @@ impl ScriptEngine {
             return std::path::Path::new(&resolved).is_dir();
         }
         if let Some(name) = cond.strip_prefix("action_success:") {
-            return self.action_results.get(name.trim()).copied().unwrap_or(false);
+            return self
+                .action_results
+                .get(name.trim())
+                .copied()
+                .unwrap_or(false);
         }
         if let Some(var_name) = cond.strip_prefix("env_set:") {
             return std::env::var(var_name.trim()).is_ok();
         }
 
         // Unknown condition — default to true with a warning
-        warn!("Unknown condition expression: '{}', defaulting to true", cond);
+        warn!(
+            "Unknown condition expression: '{}', defaulting to true",
+            cond
+        );
         true
     }
 
@@ -155,7 +170,10 @@ impl ScriptEngine {
 
         // Check condition
         if !self.evaluate_condition(&action.condition) {
-            debug!("Skipping '{}' — condition not met: {}", name, action.condition);
+            debug!(
+                "Skipping '{}' — condition not met: {}",
+                name, action.condition
+            );
             return ActionResult {
                 success: true,
                 error: None,
@@ -201,7 +219,10 @@ impl ScriptEngine {
                     ErrorPolicy::Retry(max_retries) => {
                         let mut retry_result = result;
                         for attempt in 1..=max_retries {
-                            debug!("Retry {}/{} for '{}'", attempt, max_retries, retry_result.action_name);
+                            debug!(
+                                "Retry {}/{} for '{}'",
+                                attempt, max_retries, retry_result.action_name
+                            );
                             retry_result = self.execute_action(action);
                             if retry_result.success {
                                 break;
@@ -253,38 +274,47 @@ impl ScriptEngine {
         match &action.action {
             ActionType::ShellCommand(cmd) => {
                 let resolved = self.substitute(cmd);
-                let work_dir = action.working_dir.as_ref()
-                    .map(|d| self.substitute(d));
+                let work_dir = action.working_dir.as_ref().map(|d| self.substitute(d));
 
                 let output = std::process::Command::new("cmd")
                     .args(["/C", &resolved])
                     .current_dir(work_dir.as_deref().unwrap_or("."))
                     .output()
-                    .map_err(|e| CoreError::other("shell command", format!("{}: {}", resolved, e)))?;
+                    .map_err(|e| {
+                        CoreError::other("shell command", format!("{}: {}", resolved, e))
+                    })?;
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(CoreError::other("shell command", format!(
-                        "{}: exited with {}, stderr: {}",
-                        resolved, output.status, stderr.trim()
-                    )));
+                    return Err(CoreError::other(
+                        "shell command",
+                        format!(
+                            "{}: exited with {}, stderr: {}",
+                            resolved,
+                            output.status,
+                            stderr.trim()
+                        ),
+                    ));
                 }
                 Ok(())
             }
             ActionType::CopyFile { src, dest } => {
                 let resolved_src = self.substitute(src);
                 let resolved_dest = self.substitute(dest);
-                std::fs::copy(&resolved_src, &resolved_dest)
-                    .map_err(|e| CoreError::other("copy file", format!(
-                        "{} -> {}: {}", resolved_src, resolved_dest, e
-                    )))?;
+                std::fs::copy(&resolved_src, &resolved_dest).map_err(|e| {
+                    CoreError::other(
+                        "copy file",
+                        format!("{} -> {}: {}", resolved_src, resolved_dest, e),
+                    )
+                })?;
                 Ok(())
             }
             ActionType::DeleteFile(path) => {
                 let resolved = self.substitute(path);
                 if std::path::Path::new(&resolved).exists() {
-                    std::fs::remove_file(&resolved)
-                        .map_err(|e| CoreError::other("delete file", format!("{}: {}", resolved, e)))?;
+                    std::fs::remove_file(&resolved).map_err(|e| {
+                        CoreError::other("delete file", format!("{}: {}", resolved, e))
+                    })?;
                 }
                 Ok(())
             }
@@ -297,8 +327,9 @@ impl ScriptEngine {
             ActionType::DeleteDir(path) => {
                 let resolved = self.substitute(path);
                 if std::path::Path::new(&resolved).exists() {
-                    std::fs::remove_dir_all(&resolved)
-                        .map_err(|e| CoreError::other("delete dir", format!("{}: {}", resolved, e)))?;
+                    std::fs::remove_dir_all(&resolved).map_err(|e| {
+                        CoreError::other("delete dir", format!("{}: {}", resolved, e))
+                    })?;
                 }
                 Ok(())
             }
@@ -344,10 +375,15 @@ fn run_shell_command(action: &ScriptAction) -> Result<()> {
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(CoreError::other("shell command", format!(
-                    "{}: exited with {}, stderr: {}",
-                    cmd, output.status, stderr.trim()
-                )));
+                return Err(CoreError::other(
+                    "shell command",
+                    format!(
+                        "{}: exited with {}, stderr: {}",
+                        cmd,
+                        output.status,
+                        stderr.trim()
+                    ),
+                ));
             }
             Ok(())
         }
@@ -384,9 +420,7 @@ pub fn build_variable_context(
 /// Convert a manifest `ScriptActionConfig` into a `ScriptAction` the engine can execute.
 ///
 /// Returns `None` if the action type string is unrecognized (with a warning logged).
-pub fn config_to_action(
-    cfg: &velocity_config::ScriptActionConfig,
-) -> Option<ScriptAction> {
+pub fn config_to_action(cfg: &velocity_config::ScriptActionConfig) -> Option<ScriptAction> {
     let action = match cfg.action.as_str() {
         "shell" | "cmd" => {
             let cmd = cfg.path.as_deref().unwrap_or("");
@@ -396,15 +430,11 @@ pub fn config_to_action(
             src: cfg.src.as_deref().unwrap_or("").to_string(),
             dest: cfg.dest.as_deref().unwrap_or("").to_string(),
         },
-        "delete" => ActionType::DeleteFile(
-            cfg.path.as_deref().unwrap_or("").to_string(),
-        ),
-        "delete_dir" | "rmdir" => ActionType::DeleteDir(
-            cfg.path.as_deref().unwrap_or("").to_string(),
-        ),
-        "mkdir" => ActionType::CreateDir(
-            cfg.path.as_deref().unwrap_or("").to_string(),
-        ),
+        "delete" => ActionType::DeleteFile(cfg.path.as_deref().unwrap_or("").to_string()),
+        "delete_dir" | "rmdir" => {
+            ActionType::DeleteDir(cfg.path.as_deref().unwrap_or("").to_string())
+        }
+        "mkdir" => ActionType::CreateDir(cfg.path.as_deref().unwrap_or("").to_string()),
         "registry" => ActionType::WriteRegistry {
             key: cfg.key.as_deref().unwrap_or("").to_string(),
             name: cfg.value_name.as_deref().unwrap_or("").to_string(),
@@ -442,9 +472,7 @@ pub fn config_to_action(
 
 /// Convert a slice of manifest action configs into executable script actions.
 /// Skips unrecognized action types with a warning.
-pub fn configs_to_actions(
-    configs: &[velocity_config::ScriptActionConfig],
-) -> Vec<ScriptAction> {
+pub fn configs_to_actions(configs: &[velocity_config::ScriptActionConfig]) -> Vec<ScriptAction> {
     configs.iter().filter_map(config_to_action).collect()
 }
 
@@ -467,10 +495,7 @@ mod tests {
             engine.substitute("Install to {install_dir}\\bin"),
             "Install to C:\\MyApp\\bin"
         );
-        assert_eq!(
-            engine.substitute("{app_name} v{version}"),
-            "TestApp v1.0.0"
-        );
+        assert_eq!(engine.substitute("{app_name} v{version}"), "TestApp v1.0.0");
         assert_eq!(engine.substitute("no variables here"), "no variables here");
     }
 
@@ -605,11 +630,14 @@ mod tests {
     #[test]
     fn test_create_dir_action() {
         let mut engine = test_engine();
-        let test_dir = format!("{}\\script_test_dir_{}", engine.variables["install_dir"], 
+        let test_dir = format!(
+            "{}\\script_test_dir_{}",
+            engine.variables["install_dir"],
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis());
+                .as_millis()
+        );
         let action = ScriptAction {
             name: "create test dir".to_string(),
             action: ActionType::CreateDir(test_dir.clone()),
@@ -627,10 +655,7 @@ mod tests {
     #[test]
     fn test_execute_shell_commands_compat() {
         let engine = test_engine();
-        let cmds = vec![
-            "echo hello".to_string(),
-            "echo {app_name}".to_string(),
-        ];
+        let cmds = vec!["echo hello".to_string(), "echo {app_name}".to_string()];
         let results = engine.execute_shell_commands(&cmds);
         assert_eq!(results.len(), 2);
         assert!(results[0].success);

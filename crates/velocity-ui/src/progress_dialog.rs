@@ -64,7 +64,8 @@ impl ProgressState {
 
     /// Get the current file name.
     pub fn get_file(&self) -> String {
-        self.current_file.lock()
+        self.current_file
+            .lock()
             .map(|f| f.clone())
             .unwrap_or_default()
     }
@@ -163,10 +164,7 @@ impl ProgressHandle {
             file_name.to_string()
         };
 
-        print!(
-            "\r  [{}] {:3}%  {:<30}",
-            bar, percent, display_name
-        );
+        print!("\r  [{}] {:3}%  {:<30}", bar, percent, display_name);
 
         if percent >= 100 {
             println!();
@@ -274,7 +272,11 @@ pub fn show_language_selection(
     message.push_str("Choose the installation language:\r\n\r\n");
 
     for (i, (code, name)) in languages.iter().enumerate() {
-        let marker = if code == default_code { " (default)" } else { "" };
+        let marker = if code == default_code {
+            " (default)"
+        } else {
+            ""
+        };
         message.push_str(&format!("  {}. {}{}\r\n", i + 1, name, marker));
     }
 
@@ -312,7 +314,11 @@ fn detect_system_language() -> String {
 
     // Try PowerShell to get the UI culture
     if let Ok(output) = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-Culture).TwoLetterISOLanguageName"])
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(Get-Culture).TwoLetterISOLanguageName",
+        ])
         .output()
     {
         if output.status.success() {
@@ -335,7 +341,8 @@ fn detect_system_language() -> String {
 
 /// Parse a language code from a locale string (e.g., "en-US" -> "en", "de_DE" -> "de").
 fn parse_language_code(locale: &str) -> String {
-    locale.split(['-', '_', '.'])
+    locale
+        .split(['-', '_', '.'])
         .next()
         .unwrap_or("en")
         .to_lowercase()

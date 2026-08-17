@@ -28,16 +28,16 @@ pub fn download_file(
     info!("Downloading: {}", url);
 
     // Determine output filename
-    let fname = filename
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| sanitize_filename(
+    let fname = filename.map(|s| s.to_string()).unwrap_or_else(|| {
+        sanitize_filename(
             url.rsplit('/')
                 .next()
                 .unwrap_or("download")
                 .split('?')
                 .next()
-                .unwrap_or("download")
-        ));
+                .unwrap_or("download"),
+        )
+    });
 
     std::fs::create_dir_all(output_dir)?;
     let output_path = output_dir.join(&fname);
@@ -50,10 +50,13 @@ pub fn download_file(
         let actual = compute_sha256(&data);
         let expected_lower = expected.to_lowercase();
         if actual != expected_lower {
-            return Err(CoreError::other("SHA256 verification", format!(
-                "SHA256 mismatch for {}: expected {}, got {}",
-                fname, expected_lower, actual
-            )));
+            return Err(CoreError::other(
+                "SHA256 verification",
+                format!(
+                    "SHA256 mismatch for {}: expected {}, got {}",
+                    fname, expected_lower, actual
+                ),
+            ));
         }
         debug!("SHA256 verified: {}", actual);
     }
@@ -62,7 +65,11 @@ pub fn download_file(
     let mut file = std::fs::File::create(&output_path)?;
     file.write_all(&data)?;
 
-    info!("Downloaded {} bytes to {}", data.len(), output_path.display());
+    info!(
+        "Downloaded {} bytes to {}",
+        data.len(),
+        output_path.display()
+    );
     Ok(output_path)
 }
 
@@ -89,16 +96,16 @@ pub fn download_file_resumable(
     expected_sha256: Option<&str>,
     progress: Option<&DownloadProgressCallback>,
 ) -> Result<PathBuf> {
-    let fname = filename
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| sanitize_filename(
+    let fname = filename.map(|s| s.to_string()).unwrap_or_else(|| {
+        sanitize_filename(
             url.rsplit('/')
                 .next()
                 .unwrap_or("download")
                 .split('?')
                 .next()
-                .unwrap_or("download")
-        ));
+                .unwrap_or("download"),
+        )
+    });
 
     std::fs::create_dir_all(output_dir)?;
     let output_path = output_dir.join(&fname);
@@ -162,10 +169,13 @@ pub fn download_file_resumable(
         if actual != expected_lower {
             // Delete corrupt file
             let _ = std::fs::remove_file(&output_path);
-            return Err(CoreError::other("SHA256 verification", format!(
-                "SHA256 mismatch for {}: expected {}, got {}",
-                fname, expected_lower, actual
-            )));
+            return Err(CoreError::other(
+                "SHA256 verification",
+                format!(
+                    "SHA256 mismatch for {}: expected {}, got {}",
+                    fname, expected_lower, actual
+                ),
+            ));
         }
         debug!("SHA256 verified: {}", actual);
     }
@@ -203,9 +213,10 @@ fn download_with_winhttp_resume(
             0,
         );
         if session.is_null() {
-            return Err(CoreError::other("WinHttpOpen", format!(
-                "{}", std::io::Error::last_os_error()
-            )));
+            return Err(CoreError::other(
+                "WinHttpOpen",
+                format!("{}", std::io::Error::last_os_error()),
+            ));
         }
 
         let (host, port, path, is_https) = parse_url(url)?;
@@ -218,11 +229,20 @@ fn download_with_winhttp_resume(
             return Err(CoreError::other("WinHttpConnect", "failed to connect"));
         }
 
-        let flags = if is_https { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) };
+        let flags = if is_https {
+            WINHTTP_FLAG_SECURE
+        } else {
+            WINHTTP_OPEN_REQUEST_FLAGS(0)
+        };
 
         let request = WinHttpOpenRequest(
-            connection, None, PCWSTR(path_wide.as_ptr()), PCWSTR::null(),
-            None, std::ptr::null(), flags,
+            connection,
+            None,
+            PCWSTR(path_wide.as_ptr()),
+            PCWSTR::null(),
+            None,
+            std::ptr::null(),
+            flags,
         );
         if request.is_null() {
             let _ = WinHttpCloseHandle(connection);
@@ -237,7 +257,9 @@ fn download_with_winhttp_resume(
         }
 
         // Add Range header
-        let range_header: Vec<u16> = format!("Range: bytes={}-\r\n", resume_from).encode_utf16().collect();
+        let range_header: Vec<u16> = format!("Range: bytes={}-\r\n", resume_from)
+            .encode_utf16()
+            .collect();
         let _ = WinHttpAddRequestHeaders(request, &range_header, WINHTTP_ADDREQ_FLAG_ADD);
 
         let send_result = WinHttpSendRequest(request, None, None, 0, 0, 0);
@@ -245,7 +267,10 @@ fn download_with_winhttp_resume(
             let _ = WinHttpCloseHandle(request);
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::other("WinHttpSendRequest", format!("{}", std::io::Error::last_os_error())));
+            return Err(CoreError::other(
+                "WinHttpSendRequest",
+                format!("{}", std::io::Error::last_os_error()),
+            ));
         }
 
         let receive_result = WinHttpReceiveResponse(request, std::ptr::null_mut());
@@ -284,7 +309,9 @@ fn download_with_winhttp_resume(
                     buffer.len() as u32,
                     &mut bytes_read,
                 );
-                if read_result.is_err() || bytes_read == 0 { break; }
+                if read_result.is_err() || bytes_read == 0 {
+                    break;
+                }
                 data.extend_from_slice(&buffer[..bytes_read as usize]);
             }
             let _ = WinHttpCloseHandle(request);
@@ -304,7 +331,9 @@ fn download_with_winhttp_resume(
                 buffer.len() as u32,
                 &mut bytes_read,
             );
-            if read_result.is_err() || bytes_read == 0 { break; }
+            if read_result.is_err() || bytes_read == 0 {
+                break;
+            }
             data.extend_from_slice(&buffer[..bytes_read as usize]);
             if let Some(cb) = progress {
                 cb(resume_from + data.len() as u64, 0, url);
@@ -342,9 +371,10 @@ fn download_with_winhttp(
             0,
         );
         if session.is_null() {
-            return Err(CoreError::other("WinHttpOpen", format!(
-                "{}", std::io::Error::last_os_error()
-            )));
+            return Err(CoreError::other(
+                "WinHttpOpen",
+                format!("{}", std::io::Error::last_os_error()),
+            ));
         }
 
         // Parse URL to get host and path
@@ -354,12 +384,7 @@ fn download_with_winhttp(
         let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
         // Connect to server
-        let connection = WinHttpConnect(
-            session,
-            PCWSTR(host_wide.as_ptr()),
-            port,
-            0,
-        );
+        let connection = WinHttpConnect(session, PCWSTR(host_wide.as_ptr()), port, 0);
         if connection.is_null() {
             let _ = WinHttpCloseHandle(session);
             return Err(CoreError::other("WinHttpConnect", "failed to connect"));
@@ -375,17 +400,20 @@ fn download_with_winhttp(
         // Open request
         let request = WinHttpOpenRequest(
             connection,
-            None,                           // pwszverb (GET)
-            PCWSTR(path_wide.as_ptr()),     // pwszobjectname
-            PCWSTR::null(),                 // pwszversion
-            None,                           // pwszreferrer
-            std::ptr::null(),               // ppwszaccepttypes (null array)
-            flags,                          // dwflags
+            None,                       // pwszverb (GET)
+            PCWSTR(path_wide.as_ptr()), // pwszobjectname
+            PCWSTR::null(),             // pwszversion
+            None,                       // pwszreferrer
+            std::ptr::null(),           // ppwszaccepttypes (null array)
+            flags,                      // dwflags
         );
         if request.is_null() {
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::other("WinHttpOpenRequest", "failed to open request"));
+            return Err(CoreError::other(
+                "WinHttpOpenRequest",
+                "failed to open request",
+            ));
         }
 
         // For HTTPS, enable standard certificate validation.
@@ -394,40 +422,28 @@ fn download_with_winhttp(
         if is_https {
             let sec_flags: u32 = 0; // Use default secure flags (full validation)
             let buffer = sec_flags.to_ne_bytes();
-            let _ = WinHttpSetOption(
-                Some(request),
-                WINHTTP_OPTION_SECURITY_FLAGS,
-                Some(&buffer),
-            );
+            let _ = WinHttpSetOption(Some(request), WINHTTP_OPTION_SECURITY_FLAGS, Some(&buffer));
         }
 
         // Add Range header for resume support
         if let Some(offset) = resume_from {
-            let range_header: Vec<u16> = format!("Range: bytes={}-\r\n", offset).encode_utf16().collect();
-            let _ = WinHttpAddRequestHeaders(
-                request,
-                &range_header,
-                WINHTTP_ADDREQ_FLAG_ADD,
-            );
+            let range_header: Vec<u16> = format!("Range: bytes={}-\r\n", offset)
+                .encode_utf16()
+                .collect();
+            let _ = WinHttpAddRequestHeaders(request, &range_header, WINHTTP_ADDREQ_FLAG_ADD);
             debug!("Resuming download from byte {}", offset);
         }
 
         // Send request (6 args: request, headers, headers_len, optional, optional_len, context)
-        let send_result = WinHttpSendRequest(
-            request,
-            None,
-            None,
-            0,
-            0,
-            0,
-        );
+        let send_result = WinHttpSendRequest(request, None, None, 0, 0, 0);
         if send_result.is_err() {
             let _ = WinHttpCloseHandle(request);
             let _ = WinHttpCloseHandle(connection);
             let _ = WinHttpCloseHandle(session);
-            return Err(CoreError::other("WinHttpSendRequest", format!(
-                "{}", std::io::Error::last_os_error()
-            )));
+            return Err(CoreError::other(
+                "WinHttpSendRequest",
+                format!("{}", std::io::Error::last_os_error()),
+            ));
         }
 
         // Receive response
@@ -451,7 +467,9 @@ fn download_with_winhttp(
             Some(len_buf.as_mut_ptr() as *mut std::ffi::c_void),
             &mut len_size,
             &mut index,
-        ).is_ok() {
+        )
+        .is_ok()
+        {
             let len_str = String::from_utf16_lossy(&len_buf[..(len_size as usize / 2)]);
             content_len = len_str.trim().parse().unwrap_or(0);
         }
@@ -495,19 +513,19 @@ fn download_with_winhttp(
 /// Removes path separators, null bytes, and other dangerous characters.
 fn sanitize_filename(name: &str) -> String {
     // Take only the last path component to prevent directory traversal
-    let basename = name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(name);
+    let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
 
-    let sanitized: String = basename.chars().map(|c| {
-        match c {
-            // Allow alphanumeric, hyphens, underscores, dots
-            c if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' => c,
-            // Replace everything else with underscore
-            _ => '_',
-        }
-    }).collect();
+    let sanitized: String = basename
+        .chars()
+        .map(|c| {
+            match c {
+                // Allow alphanumeric, hyphens, underscores, dots
+                c if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' => c,
+                // Replace everything else with underscore
+                _ => '_',
+            }
+        })
+        .collect();
 
     // Strip leading dots to prevent path traversal (e.g., "..hidden" → "hidden")
     let sanitized = sanitized.trim_start_matches('.').to_string();
@@ -533,7 +551,10 @@ fn parse_url(url: &str) -> Result<(String, u16, String, bool)> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         ("http", rest)
     } else {
-        return Err(CoreError::other("URL parsing", format!("Unsupported URL scheme: {}", url)));
+        return Err(CoreError::other(
+            "URL parsing",
+            format!("Unsupported URL scheme: {}", url),
+        ));
     };
 
     let is_https = scheme == "https";

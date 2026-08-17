@@ -65,7 +65,8 @@ pub fn read_payload(exe_path: &Path) -> Result<(Vec<u8>, Vec<u8>)> {
     // Sanity check: reject manifests larger than 100MB
     if manifest_len > 100 * 1024 * 1024 {
         return Err(CoreError::InvalidPayload(format!(
-            "Manifest length {} exceeds maximum allowed size (100MB)", manifest_len
+            "Manifest length {} exceeds maximum allowed size (100MB)",
+            manifest_len
         )));
     }
     let manifest_len = manifest_len as usize;
@@ -80,7 +81,8 @@ pub fn read_payload(exe_path: &Path) -> Result<(Vec<u8>, Vec<u8>)> {
     // Sanity check: reject payloads larger than 4GB
     if payload_len > 4 * 1024 * 1024 * 1024 {
         return Err(CoreError::InvalidPayload(format!(
-            "Payload length {} exceeds maximum allowed size (4GB)", payload_len
+            "Payload length {} exceeds maximum allowed size (4GB)",
+            payload_len
         )));
     }
     let payload_len = payload_len as usize;

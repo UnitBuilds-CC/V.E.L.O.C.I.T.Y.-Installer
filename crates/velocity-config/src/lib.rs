@@ -4,14 +4,14 @@
 //! resolving path variables, and auto-generating configuration from
 //! existing project structures.
 
+mod auto_gen;
+mod error;
 mod manifest;
 mod parser;
 mod variables;
-mod auto_gen;
-mod error;
 
+pub use auto_gen::*;
+pub use error::*;
 pub use manifest::*;
 pub use parser::*;
 pub use variables::*;
-pub use auto_gen::*;
-pub use error::*;

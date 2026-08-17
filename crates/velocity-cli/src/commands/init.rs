@@ -22,8 +22,7 @@ pub fn run(name: Option<String>, minimal: bool) -> Result<()> {
     info!("Initializing Velocity project: {}", project_dir.display());
 
     // Create project directory
-    std::fs::create_dir_all(&project_dir)
-        .context("Failed to create project directory")?;
+    std::fs::create_dir_all(&project_dir).context("Failed to create project directory")?;
 
     if minimal {
         create_minimal_project(&project_dir)?;
@@ -195,27 +194,27 @@ fn generate_default_icon() -> Vec<u8> {
     ico.extend_from_slice(&1u16.to_le_bytes()); // Count: 1 image
 
     // ICONDIRENTRY
-    ico.push(width as u8);   // Width (16)
-    ico.push(height as u8);  // Height (16)
-    ico.push(0);             // Color count (0 = >= 256)
-    ico.push(0);             // Reserved
+    ico.push(width as u8); // Width (16)
+    ico.push(height as u8); // Height (16)
+    ico.push(0); // Color count (0 = >= 256)
+    ico.push(0); // Reserved
     ico.extend_from_slice(&1u16.to_le_bytes()); // Color planes
-    ico.extend_from_slice(&bpp.to_le_bytes());  // Bits per pixel
+    ico.extend_from_slice(&bpp.to_le_bytes()); // Bits per pixel
     ico.extend_from_slice(&image_data_size.to_le_bytes()); // Size of image data
     ico.extend_from_slice(&(6u32 + 16u32).to_le_bytes()); // Offset to image data
 
     // BITMAPINFOHEADER
     ico.extend_from_slice(&header_size.to_le_bytes()); // biSize
-    ico.extend_from_slice(&width.to_le_bytes());       // biWidth
+    ico.extend_from_slice(&width.to_le_bytes()); // biWidth
     ico.extend_from_slice(&(height * 2).to_le_bytes()); // biHeight (2x for ICO)
-    ico.extend_from_slice(&1u16.to_le_bytes());        // biPlanes
-    ico.extend_from_slice(&bpp.to_le_bytes());         // biBitCount
-    ico.extend_from_slice(&0u32.to_le_bytes());        // biCompression (BI_RGB)
+    ico.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
+    ico.extend_from_slice(&bpp.to_le_bytes()); // biBitCount
+    ico.extend_from_slice(&0u32.to_le_bytes()); // biCompression (BI_RGB)
     ico.extend_from_slice(&pixel_data_size.to_le_bytes()); // biSizeImage
-    ico.extend_from_slice(&0u32.to_le_bytes());        // biXPelsPerMeter
-    ico.extend_from_slice(&0u32.to_le_bytes());        // biYPelsPerMeter
-    ico.extend_from_slice(&0u32.to_le_bytes());        // biClrUsed
-    ico.extend_from_slice(&0u32.to_le_bytes());        // biClrImportant
+    ico.extend_from_slice(&0u32.to_le_bytes()); // biXPelsPerMeter
+    ico.extend_from_slice(&0u32.to_le_bytes()); // biYPelsPerMeter
+    ico.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
+    ico.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
 
     // Pixel data (BGRA, bottom-up)
     // Create a blue gradient with a "V" shape for Velocity
@@ -233,7 +232,8 @@ fn generate_default_icon() -> Vec<u8> {
             let in_v = {
                 let cx = width as f32 / 2.0;
                 let left_line = (fx * height as f32) < (cx - 1.0) * (1.0 - fy) + 2.0;
-                let right_line = ((width as f32 - 1.0 - fx) * height as f32) < (cx - 1.0) * (1.0 - fy) + 2.0;
+                let right_line =
+                    ((width as f32 - 1.0 - fx) * height as f32) < (cx - 1.0) * (1.0 - fy) + 2.0;
                 let center_check = fy > 0.2 && fy < 0.9;
                 center_check && (left_line || right_line)
             };

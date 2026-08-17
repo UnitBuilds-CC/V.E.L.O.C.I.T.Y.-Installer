@@ -90,7 +90,12 @@ fn detect_app_info(project_dir: &Path) -> Result<DetectedAppInfo> {
                     }
                     if let Some(authors) = package.get("authors").and_then(|v| v.as_array()) {
                         if let Some(first_author) = authors.first().and_then(|v| v.as_str()) {
-                            publisher = first_author.split('<').next().unwrap_or("").trim().to_string();
+                            publisher = first_author
+                                .split('<')
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
                         }
                     }
                 }
@@ -174,12 +179,12 @@ fn detect_files(project_dir: &Path) -> Result<FilesConfig> {
 
     // Common exclusions
     let common_excludes = [
-        "*.pdb",        // Debug symbols
-        "*.tmp",        // Temp files
-        "*.log",        // Log files
-        ".git/**",      // Git data
+        "*.pdb",           // Debug symbols
+        "*.tmp",           // Temp files
+        "*.log",           // Log files
+        ".git/**",         // Git data
         "node_modules/**", // Node modules
-        "*.rs.bk",      // Rust backup files
+        "*.rs.bk",         // Rust backup files
     ];
 
     for exc in &common_excludes {
@@ -214,7 +219,10 @@ pub fn to_title_case(input: &str) -> String {
 }
 
 /// Collect all files matching the manifest's file configuration.
-pub fn collect_files(manifest: &VelocityManifest, base_dir: &Path) -> Result<Vec<(std::path::PathBuf, String)>> {
+pub fn collect_files(
+    manifest: &VelocityManifest,
+    base_dir: &Path,
+) -> Result<Vec<(std::path::PathBuf, String)>> {
     let mut files = Vec::new();
 
     let search_base = manifest
@@ -269,7 +277,10 @@ pub fn collect_files(manifest: &VelocityManifest, base_dir: &Path) -> Result<Vec
         if source_path.is_file() {
             files.push((source_path, mapping.dest.clone()));
         } else if source_path.is_dir() {
-            for entry in WalkDir::new(&source_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in WalkDir::new(&source_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file() {
                     let relative = entry
                         .path()

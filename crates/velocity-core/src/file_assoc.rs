@@ -45,19 +45,26 @@ fn apply_single_association(
     let prog_id = &assoc.handler;
     let exe_str = exe_path.to_string_lossy();
 
-    logging::log_op("FILE_ASSOC", &format!("Associating {} with {}", ext, prog_id));
+    logging::log_op(
+        "FILE_ASSOC",
+        &format!("Associating {} with {}", ext, prog_id),
+    );
 
     // HKCR\.ext -> ProgID
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let (ext_key, _) = hkcr.create_subkey(&ext)
+    let (ext_key, _) = hkcr
+        .create_subkey(&ext)
         .map_err(|e| CoreError::Registry(format!("Failed to create key for {}: {}", ext, e)))?;
-    ext_key.set_value("", prog_id)
-        .map_err(|e| CoreError::Registry(format!("Failed to set default value for {}: {}", ext, e)))?;
+    ext_key.set_value("", prog_id).map_err(|e| {
+        CoreError::Registry(format!("Failed to set default value for {}: {}", ext, e))
+    })?;
 
     // HKCR\ProgID
-    let (prog_key, _) = hkcr.create_subkey(prog_id)
+    let (prog_key, _) = hkcr
+        .create_subkey(prog_id)
         .map_err(|e| CoreError::Registry(format!("Failed to create ProgID key: {}", e)))?;
-    prog_key.set_value("", &assoc.description)
+    prog_key
+        .set_value("", &assoc.description)
         .map_err(|e| CoreError::Registry(format!("Failed to set ProgID description: {}", e)))?;
 
     // HKCR\ProgID\DefaultIcon
@@ -66,29 +73,38 @@ fn apply_single_association(
     } else {
         exe_str.to_string()
     };
-    let (icon_key, _) = prog_key.create_subkey("DefaultIcon")
+    let (icon_key, _) = prog_key
+        .create_subkey("DefaultIcon")
         .map_err(|e| CoreError::Registry(format!("Failed to create DefaultIcon key: {}", e)))?;
-    icon_key.set_value("", &icon_path)
+    icon_key
+        .set_value("", &icon_path)
         .map_err(|e| CoreError::Registry(format!("Failed to set icon: {}", e)))?;
 
     // HKCR\ProgID\shell\open\command
     // Build command: handler is the executable, open_command is the format
     let command = if assoc.open_command.contains("%1") {
         // open_command already has the format string with %1
-        let handler_path = exe_path.parent()
+        let handler_path = exe_path
+            .parent()
             .map(|p| p.join(&assoc.handler))
             .unwrap_or_else(|| std::path::PathBuf::from(&assoc.handler));
-        assoc.open_command.replace("%1", &format!("\"{}\"", handler_path.to_string_lossy()))
+        assoc
+            .open_command
+            .replace("%1", &format!("\"{}\"", handler_path.to_string_lossy()))
     } else {
         format!("\"{}\" {}", exe_str, assoc.open_command)
     };
-    let (shell_key, _) = prog_key.create_subkey("shell")
+    let (shell_key, _) = prog_key
+        .create_subkey("shell")
         .map_err(|e| CoreError::Registry(format!("Failed to create shell key: {}", e)))?;
-    let (open_key, _) = shell_key.create_subkey("open")
+    let (open_key, _) = shell_key
+        .create_subkey("open")
         .map_err(|e| CoreError::Registry(format!("Failed to create open key: {}", e)))?;
-    let (cmd_key, _) = open_key.create_subkey("command")
+    let (cmd_key, _) = open_key
+        .create_subkey("command")
         .map_err(|e| CoreError::Registry(format!("Failed to create command key: {}", e)))?;
-    cmd_key.set_value("", &command)
+    cmd_key
+        .set_value("", &command)
         .map_err(|e| CoreError::Registry(format!("Failed to set command: {}", e)))?;
 
     logging::log_success(&format!("File association {} -> {} created", ext, prog_id));
@@ -117,9 +133,13 @@ fn remove_single_association(assoc: &velocity_config::FileAssociationEntry) -> R
                 let _ = hkcr.delete_subkey_all(&ext);
                 logging::log_op("FILE_ASSOC", &format!("Removed extension key for {}", ext));
             } else {
-                logging::log_op("FILE_ASSOC", &format!(
-                    "Skipping extension key {} — now owned by {}", ext, current_prog_id
-                ));
+                logging::log_op(
+                    "FILE_ASSOC",
+                    &format!(
+                        "Skipping extension key {} — now owned by {}",
+                        ext, current_prog_id
+                    ),
+                );
             }
         } else {
             // No default value — safe to remove
@@ -141,13 +161,13 @@ mod tests {
         // Test that extension normalization works
         let ext1 = "txt";
         let ext2 = ".txt";
-        
+
         let normalized1 = if ext1.starts_with('.') {
             ext1.to_string()
         } else {
             format!(".{}", ext1)
         };
-        
+
         assert_eq!(normalized1, ".txt");
         assert_eq!(ext2, ".txt");
     }

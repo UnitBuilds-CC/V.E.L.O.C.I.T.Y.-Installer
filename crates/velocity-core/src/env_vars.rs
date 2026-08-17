@@ -18,12 +18,19 @@ pub fn apply_env_vars(entries: &[EnvVarEntry]) -> Result<()> {
 fn apply_env_var(entry: &EnvVarEntry) -> Result<()> {
     // Validate env var name
     if entry.name.is_empty() {
-        return Err(CoreError::other("set env var", "Environment variable name cannot be empty"));
+        return Err(CoreError::other(
+            "set env var",
+            "Environment variable name cannot be empty",
+        ));
     }
     if entry.name.contains('=') {
-        return Err(CoreError::other("set env var", format!(
-            "Environment variable name '{}' contains invalid character '='", entry.name
-        )));
+        return Err(CoreError::other(
+            "set env var",
+            format!(
+                "Environment variable name '{}' contains invalid character '='",
+                entry.name
+            ),
+        ));
     }
 
     let root = match entry.scope.as_str() {

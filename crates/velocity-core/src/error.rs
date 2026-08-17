@@ -49,7 +49,10 @@ pub enum CoreError {
 impl CoreError {
     /// Create an I/O error with context string.
     pub fn io(context: impl Into<String>, source: std::io::Error) -> Self {
-        CoreError::Io(std::io::Error::new(source.kind(), format!("{}: {}", context.into(), source)))
+        CoreError::Io(std::io::Error::new(
+            source.kind(),
+            format!("{}: {}", context.into(), source),
+        ))
     }
 
     /// Create a compression error.

@@ -19,7 +19,11 @@ use tracing::{debug, info, warn};
 pub fn create_secure_temp_dir(app_name: &str) -> Result<PathBuf> {
     let base = std::env::temp_dir();
     let session_id = uuid::Uuid::new_v4();
-    let dir_name = format!("velocity_{}_{}", sanitize_component(app_name), &session_id.to_string()[..8]);
+    let dir_name = format!(
+        "velocity_{}_{}",
+        sanitize_component(app_name),
+        &session_id.to_string()[..8]
+    );
     let temp_path = base.join(&dir_name);
 
     std::fs::create_dir_all(&temp_path)?;
@@ -55,41 +59,60 @@ pub fn validate_path_within_target(dest_path: &Path, target_dir: &Path) -> Resul
     // If canonicalize fails (e.g., path doesn't exist yet), we must NOT fall back
     // to uncanonicalized paths — that would bypass the traversal check.
     let canonical_target = target_dir.canonicalize().map_err(|e| {
-        CoreError::permission_denied("path validation", format!(
-            "Cannot resolve target directory {}: {}", target_dir.display(), e
-        ))
+        CoreError::permission_denied(
+            "path validation",
+            format!(
+                "Cannot resolve target directory {}: {}",
+                target_dir.display(),
+                e
+            ),
+        )
     })?;
 
     // For the destination, if it doesn't exist yet, canonicalize the parent
     // and append the filename to get a reliable path.
     let canonical_dest = if dest_path.exists() {
         dest_path.canonicalize().map_err(|e| {
-            CoreError::permission_denied("path validation", format!(
-                "Cannot resolve destination path {}: {}", dest_path.display(), e
-            ))
+            CoreError::permission_denied(
+                "path validation",
+                format!(
+                    "Cannot resolve destination path {}: {}",
+                    dest_path.display(),
+                    e
+                ),
+            )
         })?
     } else {
         // Parent must exist and be resolvable
         let parent = dest_path.parent().unwrap_or(dest_path);
         let file_name = dest_path.file_name().ok_or_else(|| {
-            CoreError::permission_denied("path validation", format!(
-                "Invalid destination path: {}", dest_path.display()
-            ))
+            CoreError::permission_denied(
+                "path validation",
+                format!("Invalid destination path: {}", dest_path.display()),
+            )
         })?;
         let canonical_parent = parent.canonicalize().map_err(|e| {
-            CoreError::permission_denied("path validation", format!(
-                "Cannot resolve parent directory {}: {}", parent.display(), e
-            ))
+            CoreError::permission_denied(
+                "path validation",
+                format!(
+                    "Cannot resolve parent directory {}: {}",
+                    parent.display(),
+                    e
+                ),
+            )
         })?;
         canonical_parent.join(file_name)
     };
 
     if !canonical_dest.starts_with(&canonical_target) {
-        return Err(CoreError::permission_denied("path traversal", format!(
-            "{} escapes target directory {}",
-            dest_path.display(),
-            target_dir.display()
-        )));
+        return Err(CoreError::permission_denied(
+            "path traversal",
+            format!(
+                "{} escapes target directory {}",
+                dest_path.display(),
+                target_dir.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -100,25 +123,28 @@ pub fn validate_path_within_target(dest_path: &Path, target_dir: &Path) -> Resul
 pub fn validate_relative_path(path: &str) -> Result<()> {
     // Reject null bytes
     if path.contains('\0') {
-        return Err(CoreError::permission_denied("null byte check", "Path contains null byte"));
+        return Err(CoreError::permission_denied(
+            "null byte check",
+            "Path contains null byte",
+        ));
     }
 
     // Reject absolute paths (Windows: C:\..., Unix: /...)
     let p = Path::new(path);
     if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') {
-        return Err(CoreError::permission_denied("absolute path check", format!(
-            "Absolute path not allowed in archive: {}",
-            path
-        )));
+        return Err(CoreError::permission_denied(
+            "absolute path check",
+            format!("Absolute path not allowed in archive: {}", path),
+        ));
     }
 
     // Reject path traversal
     for component in p.components() {
         if let std::path::Component::ParentDir = component {
-            return Err(CoreError::permission_denied("path traversal", format!(
-                "Path traversal detected in archive entry: {}",
-                path
-            )));
+            return Err(CoreError::permission_denied(
+                "path traversal",
+                format!("Path traversal detected in archive entry: {}", path),
+            ));
         }
     }
 
@@ -178,14 +204,10 @@ pub fn backup_file(path: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
 
-    let backup_path = path.with_extension(
-        format!(
-            "{}.velocity_backup",
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-        ),
-    );
+    let backup_path = path.with_extension(format!(
+        "{}.velocity_backup",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("")
+    ));
 
     std::fs::copy(path, &backup_path)?;
     debug!("Backed up {} to {}", path.display(), backup_path.display());
@@ -225,7 +247,13 @@ pub fn verify_file_integrity(path: &Path, expected_sha256: &str) -> Result<bool>
 /// Sanitize a string for use in file/directory names.
 fn sanitize_component(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -249,9 +277,10 @@ fn restrict_directory_acl(path: &Path) -> Result<()> {
 
     if !remove_result.status.success() {
         let stderr = String::from_utf8_lossy(&remove_result.stderr);
-        return Err(CoreError::other("ACL", format!(
-            "icacls /inheritance:r failed: {}", stderr
-        )));
+        return Err(CoreError::other(
+            "ACL",
+            format!("icacls /inheritance:r failed: {}", stderr),
+        ));
     }
 
     // Grant Full Control to current user
@@ -263,9 +292,10 @@ fn restrict_directory_acl(path: &Path) -> Result<()> {
 
     if !grant_user.status.success() {
         let stderr = String::from_utf8_lossy(&grant_user.stderr);
-        return Err(CoreError::other("ACL", format!(
-            "icacls grant user failed: {}", stderr
-        )));
+        return Err(CoreError::other(
+            "ACL",
+            format!("icacls grant user failed: {}", stderr),
+        ));
     }
 
     // Grant Full Control to Administrators group
@@ -276,9 +306,10 @@ fn restrict_directory_acl(path: &Path) -> Result<()> {
 
     if !grant_admin.status.success() {
         let stderr = String::from_utf8_lossy(&grant_admin.stderr);
-        return Err(CoreError::other("ACL", format!(
-            "icacls grant admin failed: {}", stderr
-        )));
+        return Err(CoreError::other(
+            "ACL",
+            format!("icacls grant admin failed: {}", stderr),
+        ));
     }
 
     debug!("Restricted ACLs for: {}", path.display());
@@ -295,7 +326,9 @@ fn whoami() -> String {
         .and_then(|o| {
             let stdout = String::from_utf8_lossy(&o.stdout);
             // CSV format: "username","SID"
-            stdout.lines().next()
+            stdout
+                .lines()
+                .next()
                 .and_then(|line| line.split(',').nth(1))
                 .map(|s| s.trim_matches('"').to_string())
         })

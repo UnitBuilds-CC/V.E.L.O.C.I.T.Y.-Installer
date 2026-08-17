@@ -65,9 +65,7 @@ pub fn run(
     cmd.arg(installer_path);
 
     // Run signtool
-    let output = cmd
-        .output()
-        .context("Failed to run signtool.exe")?;
+    let output = cmd.output().context("Failed to run signtool.exe")?;
 
     if output.status.success() {
         println!("Successfully signed: {}", installer_path);
@@ -79,11 +77,7 @@ pub fn run(
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
-            "Code signing failed:\n{}\n{}",
-            stderr,
-            stdout
-        );
+        anyhow::bail!("Code signing failed:\n{}\n{}", stderr, stdout);
     }
 }
 
@@ -112,11 +106,7 @@ pub fn verify(installer_path: &str) -> Result<()> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
-            "Signature verification failed:\n{}\n{}",
-            stderr,
-            stdout
-        );
+        anyhow::bail!("Signature verification failed:\n{}\n{}", stderr, stdout);
     }
 }
 

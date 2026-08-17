@@ -16,7 +16,7 @@
 //! - Installation progress page
 //! - Completion page
 
-use crate::error::{UiError, Result};
+use crate::error::{Result, UiError};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 use velocity_config::VelocityManifest;
@@ -48,9 +48,11 @@ pub struct WizardResult {
 pub fn run_classic_wizard(manifest: &VelocityManifest) -> Result<WizardResult> {
     info!("Starting classic wizard for: {}", manifest.app.name);
 
-    let default_dir = velocity_config::VariableResolver::new(
-        &PathBuf::from(format!("C:\\Program Files\\{}", manifest.app.name)),
-    ).resolve(&manifest.install.default_dir);
+    let default_dir = velocity_config::VariableResolver::new(&PathBuf::from(format!(
+        "C:\\Program Files\\{}",
+        manifest.app.name
+    )))
+    .resolve(&manifest.install.default_dir);
 
     // Check if we have a license file to display
     let has_license = manifest.app.license.is_some();
@@ -130,12 +132,20 @@ fn show_welcome_dialog(app_name: &str, publisher: &str) -> DialogAction {
          {}\r\n\r\n\
          It is recommended that you close all other applications before continuing.\r\n\r\n\
          Click Next to continue, or Cancel to exit Setup.",
-        app_name, app_name,
-        if publisher.is_empty() { String::new() } else { format!("Publisher: {}", publisher) }
+        app_name,
+        app_name,
+        if publisher.is_empty() {
+            String::new()
+        } else {
+            format!("Publisher: {}", publisher)
+        }
     );
 
     unsafe {
-        let title_w: Vec<u16> = format!("{} Setup", app_name).encode_utf16().chain(std::iter::once(0)).collect();
+        let title_w: Vec<u16> = format!("{} Setup", app_name)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
         let result = MessageBoxW(
             None,
@@ -162,7 +172,8 @@ fn show_license_dialog(app_name: &str, license_text: &str) -> DialogAction {
          {}\r\n\r\n\
          Press Page Down to see the rest of the agreement.\r\n\r\n\
          Do you accept all the terms of the preceding license agreement?",
-        app_name, app_name,
+        app_name,
+        app_name,
         if license_text.len() > 2000 {
             format!("{}...", &license_text[..2000])
         } else {
@@ -171,7 +182,10 @@ fn show_license_dialog(app_name: &str, license_text: &str) -> DialogAction {
     );
 
     unsafe {
-        let title_w: Vec<u16> = format!("{} License Agreement", app_name).encode_utf16().chain(std::iter::once(0)).collect();
+        let title_w: Vec<u16> = format!("{} License Agreement", app_name)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
         let result = MessageBoxW(
             None,
@@ -202,34 +216,39 @@ fn show_directory_dialog(app_name: &str, default_dir: &str) -> Result<String> {
     unsafe {
         let _ = CoInitialize(None).ok();
 
-        let dialog: IFileOpenDialog = CoCreateInstance(
-            &FileOpenDialog,
-            None,
-            CLSCTX_INPROC_SERVER,
-        ).map_err(|e| UiError::Win32(format!("Failed to create file dialog: {}", e)))?;
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| UiError::Win32(format!("Failed to create file dialog: {}", e)))?;
 
-        dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
+        dialog
+            .SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
             .map_err(|e| UiError::Win32(format!("Failed to set dialog options: {}", e)))?;
 
         let title: Vec<u16> = format!("Select installation directory for {}\0", app_name)
             .encode_utf16()
             .collect();
-        dialog.SetTitle(PCWSTR(title.as_ptr()))
+        dialog
+            .SetTitle(PCWSTR(title.as_ptr()))
             .map_err(|e| UiError::Win32(format!("Failed to set title: {}", e)))?;
 
         match dialog.Show(None) {
             Ok(()) => {
-                let result = dialog.GetResult()
+                let result = dialog
+                    .GetResult()
                     .map_err(|e| UiError::Win32(format!("Failed to get result: {}", e)))?;
-                let path = result.GetDisplayName(SIGDN_FILESYSPATH)
+                let path = result
+                    .GetDisplayName(SIGDN_FILESYSPATH)
                     .map_err(|e| UiError::Win32(format!("Failed to get path: {}", e)))?;
-                let path_str = path.to_string()
+                let path_str = path
+                    .to_string()
                     .map_err(|e| UiError::Win32(format!("Invalid path: {}", e)))?;
                 CoTaskMemFree(Some(path.0 as *mut _));
                 Ok(path_str)
             }
             Err(_e) => {
-                debug!("Folder dialog cancelled or failed, using default: {}", default_dir);
+                debug!(
+                    "Folder dialog cancelled or failed, using default: {}",
+                    default_dir
+                );
                 Ok(default_dir.to_string())
             }
         }
@@ -267,14 +286,14 @@ impl ProgressHandle {
             let bar: String = std::iter::repeat_n('█', filled)
                 .chain(std::iter::repeat_n('░', empty))
                 .collect();
-            
+
             // Truncate filename if too long
             let display_name = if file_name.len() > 30 {
-                format!("...{}", &file_name[file_name.len()-27..])
+                format!("...{}", &file_name[file_name.len() - 27..])
             } else {
                 file_name.to_string()
             };
-            
+
             print!("\r  [{}] {:3}%  {}", bar, percent, display_name);
             if percent >= 100 {
                 println!();
@@ -362,18 +381,18 @@ pub fn show_finish_dialog(app_name: &str, install_dir: &Path, run_after: Option<
     );
 
     if let Some(exe) = run_after {
-        message.push_str(&format!(
-            "\r\n\r\nWould you like to launch {} now?",
-            exe
-        ));
+        message.push_str(&format!("\r\n\r\nWould you like to launch {} now?", exe));
     }
 
     message.push_str("\r\n\r\nClick OK to finish the setup.");
 
     unsafe {
-        let title_w: Vec<u16> = format!("{} Setup Complete", app_name).encode_utf16().chain(std::iter::once(0)).collect();
+        let title_w: Vec<u16> = format!("{} Setup Complete", app_name)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-        
+
         // If there's a run_after exe, show Yes/No/Cancel (Yes = launch + close)
         // Otherwise just OK
         if run_after.is_some() {
@@ -402,8 +421,8 @@ pub fn show_finish_dialog(app_name: &str, install_dir: &Path, run_after: Option<
 /// password input box, we use a message box with an input prompt.
 /// The user enters the password via stdin as fallback.
 pub fn show_password_prompt() -> String {
-    use windows::Win32::UI::WindowsAndMessaging::*;
     use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::*;
 
     info!("Prompting user for installer password");
 
@@ -447,7 +466,10 @@ pub fn show_update_notification(
     use windows::core::*;
     use windows::Win32::UI::WindowsAndMessaging::*;
 
-    info!("Showing update notification: {} -> {}", current_version, latest_version);
+    info!(
+        "Showing update notification: {} -> {}",
+        current_version, latest_version
+    );
 
     let mut message = format!(
         "A new version of {} is available!\n\n\
@@ -468,10 +490,7 @@ pub fn show_update_notification(
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    let msg_w: Vec<u16> = message
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
 
     let result = unsafe {
         MessageBoxW(

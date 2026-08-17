@@ -107,10 +107,7 @@ pub fn format_size(bytes: u64) -> String {
 /// all dependency targets are also included.
 ///
 /// Returns a new set of IDs with dependencies added.
-pub fn resolve_dependencies(
-    components: &[Component],
-    selected_ids: &[String],
-) -> Vec<String> {
+pub fn resolve_dependencies(components: &[Component], selected_ids: &[String]) -> Vec<String> {
     let flat = flatten_component_tree(components);
     let mut result: Vec<String> = selected_ids.to_vec();
 
@@ -220,10 +217,7 @@ mod tests {
     fn test_resolve_dependencies() {
         let mut sdk = make_component("sdk", "SDK", 3_000_000, false);
         sdk.depends_on = vec!["core".to_string()];
-        let comps = vec![
-            make_component("core", "Core", 10_000_000, false),
-            sdk,
-        ];
+        let comps = vec![make_component("core", "Core", 10_000_000, false), sdk];
         let resolved = resolve_dependencies(&comps, &["sdk".into()]);
         assert!(resolved.contains(&"core".to_string()));
         assert!(resolved.contains(&"sdk".to_string()));

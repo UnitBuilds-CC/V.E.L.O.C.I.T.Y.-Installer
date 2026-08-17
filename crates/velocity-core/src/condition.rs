@@ -52,17 +52,21 @@ pub fn evaluate_condition(condition: &str) -> Result<bool> {
     let (cond_type, argument) = match condition.find(':') {
         Some(pos) => (&condition[..pos], condition[pos + 1..].trim()),
         None => {
-            return Err(CoreError::other("condition", format!(
-                "Invalid condition format: '{}'. Expected 'type:argument' or 'always'/'never'.",
-                condition
-            )));
+            return Err(CoreError::other(
+                "condition",
+                format!(
+                    "Invalid condition format: '{}'. Expected 'type:argument' or 'always'/'never'.",
+                    condition
+                ),
+            ));
         }
     };
 
     if argument.is_empty() {
-        return Err(CoreError::other("condition", format!(
-            "Empty argument in condition: '{}'", condition
-        )));
+        return Err(CoreError::other(
+            "condition",
+            format!("Empty argument in condition: '{}'", condition),
+        ));
     }
 
     match cond_type {
@@ -79,11 +83,14 @@ pub fn evaluate_condition(condition: &str) -> Result<bool> {
         "winver_at_least" => eval_winver_at_least(argument),
         "service_exists" => eval_service_exists(argument),
         "service_running" => eval_service_running(argument),
-        "env" => Ok(std::env::var(argument).map(|v| !v.is_empty()).unwrap_or(false)),
+        "env" => Ok(std::env::var(argument)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)),
         "env_equals" => eval_env_equals(argument),
-        _ => Err(CoreError::other("condition", format!(
-            "Unknown condition type: '{}'", cond_type
-        ))),
+        _ => Err(CoreError::other(
+            "condition",
+            format!("Unknown condition type: '{}'", cond_type),
+        )),
     }
 }
 
@@ -111,18 +118,20 @@ fn eval_registry_exists(key_path: &str) -> Result<bool> {
         "HKCR" | "HKEY_CLASSES_ROOT" => HKEY_CLASSES_ROOT,
         "HKU" | "HKEY_USERS" => HKEY_USERS,
         _ => {
-            return Err(CoreError::other("condition", format!(
-                "Unknown registry root: '{}'", root
-            )));
+            return Err(CoreError::other(
+                "condition",
+                format!("Unknown registry root: '{}'", root),
+            ));
         }
     };
 
     match winreg::RegKey::predef(hive).open_subkey(sub_key) {
         Ok(_) => Ok(true),
         Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(CoreError::other("condition", format!(
-            "Registry check failed for '{}': {}", key_path, e
-        ))),
+        Err(e) => Err(CoreError::other(
+            "condition",
+            format!("Registry check failed for '{}': {}", key_path, e),
+        )),
     }
 }
 
@@ -133,11 +142,15 @@ fn eval_registry_value_exists(path_with_value: &str) -> Result<bool> {
     use winreg::enums::*;
 
     // Split into key path and value name
-    let last_sep = path_with_value.rfind('\\')
-        .ok_or_else(|| CoreError::other("condition", format!(
-            "Invalid registry value path: '{}'. Expected 'ROOT\\Key\\ValueName'.",
-            path_with_value
-        )))?;
+    let last_sep = path_with_value.rfind('\\').ok_or_else(|| {
+        CoreError::other(
+            "condition",
+            format!(
+                "Invalid registry value path: '{}'. Expected 'ROOT\\Key\\ValueName'.",
+                path_with_value
+            ),
+        )
+    })?;
 
     let key_path = &path_with_value[..last_sep];
     let value_name = &path_with_value[last_sep + 1..];
@@ -150,26 +163,31 @@ fn eval_registry_value_exists(path_with_value: &str) -> Result<bool> {
         "HKCR" | "HKEY_CLASSES_ROOT" => HKEY_CLASSES_ROOT,
         "HKU" | "HKEY_USERS" => HKEY_USERS,
         _ => {
-            return Err(CoreError::other("condition", format!(
-                "Unknown registry root: '{}'", root
-            )));
+            return Err(CoreError::other(
+                "condition",
+                format!("Unknown registry root: '{}'", root),
+            ));
         }
     };
 
     let key = match winreg::RegKey::predef(hive).open_subkey(sub_key) {
         Ok(key) => key,
         Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(CoreError::other("condition", format!(
-            "Registry check failed: {}", e
-        ))),
+        Err(e) => {
+            return Err(CoreError::other(
+                "condition",
+                format!("Registry check failed: {}", e),
+            ))
+        }
     };
 
     match key.get_raw_value(value_name) {
         Ok(_) => Ok(true),
         Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(CoreError::other("condition", format!(
-            "Registry value check failed: {}", e
-        ))),
+        Err(e) => Err(CoreError::other(
+            "condition",
+            format!("Registry value check failed: {}", e),
+        )),
     }
 }
 
@@ -206,12 +224,17 @@ fn eval_add_remove_installed(product_name: &str) -> Result<bool> {
 fn eval_arch_condition(arch: &str) -> Result<bool> {
     let info = crate::arch_detect::detect_system_info();
     match arch.to_lowercase().as_str() {
-        "x86" | "x86_32" | "win32" | "32bit" => Ok(info.os_arch == crate::arch_detect::SystemArch::X86),
-        "x64" | "x86_64" | "amd64" | "64bit" => Ok(info.os_arch == crate::arch_detect::SystemArch::X64),
+        "x86" | "x86_32" | "win32" | "32bit" => {
+            Ok(info.os_arch == crate::arch_detect::SystemArch::X86)
+        }
+        "x64" | "x86_64" | "amd64" | "64bit" => {
+            Ok(info.os_arch == crate::arch_detect::SystemArch::X64)
+        }
         "arm64" | "aarch64" => Ok(info.os_arch == crate::arch_detect::SystemArch::Arm64),
-        _ => Err(CoreError::other("condition", format!(
-            "Unknown architecture: '{}'. Use x86, x64, or arm64.", arch
-        ))),
+        _ => Err(CoreError::other(
+            "condition",
+            format!("Unknown architecture: '{}'. Use x86, x64, or arm64.", arch),
+        )),
     }
 }
 
@@ -223,16 +246,26 @@ fn eval_winver_at_least(version_str: &str) -> Result<bool> {
 
     let parts: Vec<&str> = version_str.split('.').collect();
     if parts.len() != 2 {
-        return Err(CoreError::other("condition", format!(
-            "Invalid version format: '{}'. Expected 'major.minor'.", version_str
-        )));
+        return Err(CoreError::other(
+            "condition",
+            format!(
+                "Invalid version format: '{}'. Expected 'major.minor'.",
+                version_str
+            ),
+        ));
     }
 
     let required_major: u32 = parts[0].parse().map_err(|_| {
-        CoreError::other("condition", format!("Invalid major version: '{}'", parts[0]))
+        CoreError::other(
+            "condition",
+            format!("Invalid major version: '{}'", parts[0]),
+        )
     })?;
     let required_minor: u32 = parts[1].parse().map_err(|_| {
-        CoreError::other("condition", format!("Invalid minor version: '{}'", parts[1]))
+        CoreError::other(
+            "condition",
+            format!("Invalid minor version: '{}'", parts[1]),
+        )
     })?;
 
     // Get Windows version from registry (reliable method)
@@ -245,7 +278,9 @@ fn eval_winver_at_least(version_str: &str) -> Result<bool> {
             key.get_value::<String, _>("CurrentMinorVersionNumber"),
         ) {
             if let (Ok(major), Ok(minor)) = (major_str.parse::<u32>(), minor_str.parse::<u32>()) {
-                return Ok(major > required_major || (major == required_major && minor >= required_minor));
+                return Ok(
+                    major > required_major || (major == required_major && minor >= required_minor)
+                );
             }
         }
 
@@ -253,8 +288,11 @@ fn eval_winver_at_least(version_str: &str) -> Result<bool> {
         if let Ok(current_version) = key.get_value::<String, _>("CurrentVersion") {
             let cv_parts: Vec<&str> = current_version.split('.').collect();
             if cv_parts.len() >= 2 {
-                if let (Ok(major), Ok(minor)) = (cv_parts[0].parse::<u32>(), cv_parts[1].parse::<u32>()) {
-                    return Ok(major > required_major || (major == required_major && minor >= required_minor));
+                if let (Ok(major), Ok(minor)) =
+                    (cv_parts[0].parse::<u32>(), cv_parts[1].parse::<u32>())
+                {
+                    return Ok(major > required_major
+                        || (major == required_major && minor >= required_minor));
                 }
             }
         }
@@ -294,10 +332,15 @@ fn eval_service_running(service_name: &str) -> Result<bool> {
 ///
 /// Argument format: `VAR_NAME=value`
 fn eval_env_equals(argument: &str) -> Result<bool> {
-    let eq_pos = argument.find('=')
-        .ok_or_else(|| CoreError::other("condition", format!(
-            "Invalid env_equals format: '{}'. Expected 'VAR_NAME=value'.", argument
-        )))?;
+    let eq_pos = argument.find('=').ok_or_else(|| {
+        CoreError::other(
+            "condition",
+            format!(
+                "Invalid env_equals format: '{}'. Expected 'VAR_NAME=value'.",
+                argument
+            ),
+        )
+    })?;
 
     let var_name = &argument[..eq_pos];
     let expected_value = &argument[eq_pos + 1..];
@@ -313,10 +356,15 @@ fn eval_env_equals(argument: &str) -> Result<bool> {
 /// Input: `HKLM\\Software\\Microsoft`
 /// Output: `("HKLM", "Software\\Microsoft")`
 fn parse_registry_path(path: &str) -> Result<(&str, &str)> {
-    let sep = path.find('\\')
-        .ok_or_else(|| CoreError::other("condition", format!(
-            "Invalid registry path: '{}'. Expected 'ROOT\\Sub\\Key'.", path
-        )))?;
+    let sep = path.find('\\').ok_or_else(|| {
+        CoreError::other(
+            "condition",
+            format!(
+                "Invalid registry path: '{}'. Expected 'ROOT\\Sub\\Key'.",
+                path
+            ),
+        )
+    })?;
 
     Ok((&path[..sep], &path[sep + 1..]))
 }
@@ -327,32 +375,42 @@ mod tests {
 
     #[test]
     fn test_always_condition() {
-        assert_eq!(evaluate_condition("always").unwrap(), true);
-        assert_eq!(evaluate_condition("").unwrap(), true);
+        assert!(evaluate_condition("always").unwrap());
+        assert!(evaluate_condition("").unwrap());
     }
 
     #[test]
     fn test_never_condition() {
-        assert_eq!(evaluate_condition("never").unwrap(), false);
+        assert!(!evaluate_condition("never").unwrap());
     }
 
     #[test]
     fn test_file_exists() {
         // This file should exist on Windows
-        assert_eq!(evaluate_condition("file_exists:C:\\Windows\\System32\\kernel32.dll").unwrap(), true);
-        assert_eq!(evaluate_condition("file_exists:C:\\nonexistent_file_xyz_123.dll").unwrap(), false);
+        assert!(
+            evaluate_condition("file_exists:C:\\Windows\\System32\\kernel32.dll").unwrap()
+        );
+        assert!(
+            !evaluate_condition("file_exists:C:\\nonexistent_file_xyz_123.dll").unwrap()
+        );
     }
 
     #[test]
     fn test_file_missing() {
-        assert_eq!(evaluate_condition("file_missing:C:\\nonexistent_file_xyz_123.dll").unwrap(), true);
-        assert_eq!(evaluate_condition("file_missing:C:\\Windows\\System32\\kernel32.dll").unwrap(), false);
+        assert!(
+            evaluate_condition("file_missing:C:\\nonexistent_file_xyz_123.dll").unwrap()
+        );
+        assert!(
+            !evaluate_condition("file_missing:C:\\Windows\\System32\\kernel32.dll").unwrap()
+        );
     }
 
     #[test]
     fn test_dir_exists() {
-        assert_eq!(evaluate_condition("dir_exists:C:\\Windows").unwrap(), true);
-        assert_eq!(evaluate_condition("dir_exists:C:\\nonexistent_dir_xyz").unwrap(), false);
+        assert!(evaluate_condition("dir_exists:C:\\Windows").unwrap());
+        assert!(
+            !evaluate_condition("dir_exists:C:\\nonexistent_dir_xyz").unwrap()
+        );
     }
 
     #[test]
@@ -368,8 +426,10 @@ mod tests {
     #[test]
     fn test_env_condition() {
         // PATH should be set on any system
-        assert_eq!(evaluate_condition("env:PATH").unwrap(), true);
-        assert_eq!(evaluate_condition("env:VELOCITY_NONEXISTENT_VAR_XYZ").unwrap(), false);
+        assert!(evaluate_condition("env:PATH").unwrap());
+        assert!(
+            !evaluate_condition("env:VELOCITY_NONEXISTENT_VAR_XYZ").unwrap()
+        );
     }
 
     #[test]
@@ -391,17 +451,13 @@ mod tests {
 
     #[test]
     fn test_evaluate_all_conditions() {
-        let conditions = vec![
-            "always".to_string(),
-            "file_exists:C:\\Windows".to_string(),
-        ];
-        assert_eq!(evaluate_all_conditions(&conditions).unwrap(), true);
+        let conditions = vec!["always".to_string(), "file_exists:C:\\Windows".to_string()];
+        assert!(evaluate_all_conditions(&conditions).unwrap());
 
-        let conditions_with_false = vec![
-            "always".to_string(),
-            "never".to_string(),
-        ];
-        assert_eq!(evaluate_all_conditions(&conditions_with_false).unwrap(), false);
+        let conditions_with_false = vec!["always".to_string(), "never".to_string()];
+        assert!(
+            !evaluate_all_conditions(&conditions_with_false).unwrap()
+        );
     }
 
     #[test]

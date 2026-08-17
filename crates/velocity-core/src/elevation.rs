@@ -24,7 +24,12 @@ pub fn is_admin() -> bool {
             2,
             0x00000020, // SECURITY_BUILTIN_DOMAIN_RID
             0x00000220, // DOMAIN_ALIAS_RID_ADMINS
-            0, 0, 0, 0, 0, 0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
             &mut admin_sid as *mut PSID,
         );
 
@@ -33,11 +38,7 @@ pub fn is_admin() -> bool {
         }
 
         let mut is_member: BOOL = BOOL(0);
-        let result = CheckTokenMembership(
-            None,
-            admin_sid,
-            &mut is_member,
-        );
+        let result = CheckTokenMembership(None, admin_sid, &mut is_member);
 
         let _ = FreeSid(admin_sid);
 
@@ -83,10 +84,7 @@ fn shell_execute_elevated(exe_path: &Path, args: &[String]) -> Result<bool> {
         .collect();
 
     let args_str = args.join(" ");
-    let args_wide: Vec<u16> = args_str
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let args_wide: Vec<u16> = args_str.encode_utf16().chain(std::iter::once(0)).collect();
 
     let dir = exe_path
         .parent()

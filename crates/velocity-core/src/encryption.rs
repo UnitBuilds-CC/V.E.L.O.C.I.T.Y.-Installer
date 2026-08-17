@@ -40,7 +40,10 @@ pub fn encrypt(data: &[u8], password: &str) -> Vec<u8> {
         return data.to_vec();
     }
 
-    info!("Encrypting data with AES-256-GCM + PBKDF2 ({} bytes input)", data.len());
+    info!(
+        "Encrypting data with AES-256-GCM + PBKDF2 ({} bytes input)",
+        data.len()
+    );
 
     // Generate random salt for PBKDF2
     let salt = generate_salt();
@@ -169,12 +172,7 @@ pub fn is_encrypted(data: &[u8]) -> bool {
 /// The salt should be unique for each encryption operation.
 fn derive_key(password: &str, salt: &[u8]) -> [u8; 32] {
     let mut key = [0u8; 32];
-    pbkdf2::pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        salt,
-        PBKDF2_ROUNDS,
-        &mut key,
-    );
+    pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ROUNDS, &mut key);
     key
 }
 

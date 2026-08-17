@@ -29,7 +29,11 @@ impl HashAlgorithm {
 /// Compute the hash of a file.
 pub fn hash_file(path: &Path, algo: HashAlgorithm) -> Result<String> {
     let mut file = std::fs::File::open(path).map_err(|e| {
-        CoreError::Other(format!("Failed to open file for hashing {}: {}", path.display(), e))
+        CoreError::Other(format!(
+            "Failed to open file for hashing {}: {}",
+            path.display(),
+            e
+        ))
     })?;
 
     let mut buffer = [0u8; 8192];
@@ -185,7 +189,12 @@ mod tests {
         assert!(verify_file(&file_path, &hash, HashAlgorithm::Sha256).unwrap());
 
         // Verify wrong hash
-        assert!(!verify_file(&file_path, "0000000000000000000000000000000000000000000000000000000000000000", HashAlgorithm::Sha256).unwrap());
+        assert!(!verify_file(
+            &file_path,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            HashAlgorithm::Sha256
+        )
+        .unwrap());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

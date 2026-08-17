@@ -101,7 +101,8 @@ impl InstallerMutex {
             // Try to open the existing mutex
             let result = OpenMutexW(
                 windows::Win32::System::Threading::SYNCHRONIZATION_ACCESS_RIGHTS(0x00100000u32),
-                false, PCWSTR(name_w.as_ptr()),
+                false,
+                PCWSTR(name_w.as_ptr()),
             );
             match result {
                 Ok(handle) => {

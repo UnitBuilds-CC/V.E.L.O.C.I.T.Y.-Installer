@@ -63,7 +63,10 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
     }
 
     let manifest = velocity_config::parse_manifest(&manifest_path)?;
-    info!("Building installer for: {} v{}", manifest.app.name, manifest.app.version);
+    info!(
+        "Building installer for: {} v{}",
+        manifest.app.name, manifest.app.version
+    );
 
     // Step 2: Collect files to package
     let files = collect_files(&manifest, &options.project_dir)?;
@@ -71,11 +74,16 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         return Err(CompilerError::NoFilesFound);
     }
 
-    let original_size: u64 = files.iter()
+    let original_size: u64 = files
+        .iter()
         .filter_map(|(path, _)| std::fs::metadata(path).ok().map(|m| m.len()))
         .sum();
 
-    info!("Collected {} files ({} bytes uncompressed)", files.len(), original_size);
+    info!(
+        "Collected {} files ({} bytes uncompressed)",
+        files.len(),
+        original_size
+    );
 
     // Step 3: Create compressed archive with selected format
     let format = match options.compression_format.to_lowercase().as_str() {
@@ -83,9 +91,15 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
         _ => velocity_core::extract::CompressionFormat::Zstd,
     };
     let compressed_data = velocity_core::extract::create_archive_with_format(
-        &files, options.compression_level, format,
+        &files,
+        options.compression_level,
+        format,
     )?;
-    info!("Compressed payload: {} bytes ({:?} format)", compressed_data.len(), format);
+    info!(
+        "Compressed payload: {} bytes ({:?} format)",
+        compressed_data.len(),
+        format
+    );
 
     // Step 3.5: Encrypt payload if password is set
     let final_payload_data = if !manifest.install.password.is_empty() {
@@ -133,8 +147,7 @@ pub fn build_installer(options: &BuildOptions) -> Result<BuildResult> {
 
     // Step 9: Set version info
     let default_desc = format!("{} Installer", manifest.app.name);
-    let description = manifest.app.description.as_deref()
-        .unwrap_or(&default_desc);
+    let description = manifest.app.description.as_deref().unwrap_or(&default_desc);
     let _ = velocity_core::pe_icon::set_exe_version_info(
         &options.output_path,
         &manifest.app.version,
@@ -176,8 +189,12 @@ fn find_or_build_runtime(options: &BuildOptions) -> Result<Vec<u8>> {
     // Look for the runtime in common locations
     let candidates = [
         // In the workspace target directory (if building from source)
-        options.project_dir.join("target/release/velocity-runtime.exe"),
-        options.project_dir.join("target/debug/velocity-runtime.exe"),
+        options
+            .project_dir
+            .join("target/release/velocity-runtime.exe"),
+        options
+            .project_dir
+            .join("target/debug/velocity-runtime.exe"),
         // Relative to the compiler crate
         PathBuf::from("target/release/velocity-runtime.exe"),
         PathBuf::from("target/debug/velocity-runtime.exe"),
@@ -286,7 +303,11 @@ theme = "classic"
         // Create archive with various compression levels
         for level in [1, 3, 10, 19] {
             let archive = extract::create_archive(&files, level).unwrap();
-            assert!(!archive.is_empty(), "Archive should not be empty at level {}", level);
+            assert!(
+                !archive.is_empty(),
+                "Archive should not be empty at level {}",
+                level
+            );
 
             // Extract and verify
             let extract_dir = temp_dir.join(format!("extract_l{}", level));

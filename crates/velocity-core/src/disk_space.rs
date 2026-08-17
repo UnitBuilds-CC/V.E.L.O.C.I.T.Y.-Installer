@@ -11,7 +11,7 @@ use std::path::Path;
 /// Returns Ok(()) if sufficient space, or Err with details.
 pub fn check_disk_space(target_dir: &Path, required_bytes: u64) -> Result<()> {
     let free_bytes = get_free_disk_space(target_dir)?;
-    
+
     if free_bytes < required_bytes {
         return Err(CoreError::Other(format!(
             "Insufficient disk space. Required: {} MB, Available: {} MB",
@@ -19,7 +19,7 @@ pub fn check_disk_space(target_dir: &Path, required_bytes: u64) -> Result<()> {
             free_bytes / (1024 * 1024)
         )));
     }
-    
+
     Ok(())
 }
 
@@ -31,19 +31,19 @@ pub fn get_free_disk_space(path: &Path) -> Result<u64> {
     // Get the root of the drive
     let root = get_drive_root(path);
     let root_wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
-    
+
     unsafe {
         let mut free_bytes_available: u64 = 0;
         let mut total_bytes: u64 = 0;
         let mut total_free_bytes: u64 = 0;
-        
+
         let result = GetDiskFreeSpaceExW(
             PCWSTR(root_wide.as_ptr()),
             Some(&mut free_bytes_available),
             Some(&mut total_bytes),
             Some(&mut total_free_bytes),
         );
-        
+
         if result.is_ok() {
             Ok(total_free_bytes)
         } else {
@@ -87,7 +87,7 @@ pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
-    
+
     if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
     } else if bytes >= MB {
