@@ -22,6 +22,14 @@
 //! - `"service_running:ServiceName"` — true if service is running
 //! - `"env:VAR_NAME"` — true if environment variable is set and non-empty
 //! - `"env_equals:VAR_NAME=value"` — true if env var equals value
+//!
+//! Note: registry, service, winver, and Add/Remove Programs conditions are
+//! Windows-only. On other platforms they return an error.
+//!
+//! This module is currently Windows-only. Cross-platform condition evaluation
+//! will be provided via the platform module.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 

@@ -199,13 +199,29 @@ fn main() -> Result<()> {
             config,
             args,
         } => {
-            commands::dep::run(&subcommand, &config, &args)?;
+            #[cfg(target_os = "windows")]
+            {
+                commands::dep::run(&subcommand, &config, &args)?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = (subcommand, config, args);
+                eprintln!("The 'dep' command is currently only supported on Windows.");
+            }
         }
         Commands::Update { check } => {
-            if check {
-                commands::update::run_check()?;
-            } else {
-                commands::update::run_update()?;
+            #[cfg(target_os = "windows")]
+            {
+                if check {
+                    commands::update::run_check()?;
+                } else {
+                    commands::update::run_update()?;
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = check;
+                eprintln!("The 'update' command is currently only supported on Windows.");
             }
         }
     }

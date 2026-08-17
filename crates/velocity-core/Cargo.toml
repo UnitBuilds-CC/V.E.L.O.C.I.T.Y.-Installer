@@ -13,8 +13,6 @@ serde_json = { workspace = true }
 zstd = { workspace = true }
 tar = { workspace = true }
 lzma-rs = { workspace = true }
-windows = { workspace = true }
-winreg = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -25,3 +23,10 @@ pbkdf2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 aes-gcm = { workspace = true }
+getrandom = { workspace = true }
+dirs = { workspace = true }
+
+# Windows-only dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true }
+winreg = { workspace = true }

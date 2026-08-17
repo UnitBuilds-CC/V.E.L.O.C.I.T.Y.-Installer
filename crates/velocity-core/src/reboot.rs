@@ -6,6 +6,10 @@
 //! - Request system reboot
 //! - Set/clear reboot-required flag in registry
 //! - PendingFileRenameOperations management
+//!
+//! Most functionality is Windows-specific (registry-based reboot management).
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use std::path::Path;

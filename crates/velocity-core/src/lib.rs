@@ -24,6 +24,7 @@ pub mod localization;
 pub mod logging;
 pub mod payload;
 pub mod pe_icon;
+pub mod platform;
 pub mod process_detect;
 pub mod reboot;
 pub mod registry;

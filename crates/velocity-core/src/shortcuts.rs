@@ -1,4 +1,8 @@
 //! Windows shortcut (.lnk) creation via COM IShellLink.
+//!
+//! Windows-only: uses COM IShellLinkW and SHGetKnownFolderPath.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use std::os::windows::ffi::OsStrExt;

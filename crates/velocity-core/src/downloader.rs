@@ -4,6 +4,11 @@
 //! - Progress callbacks for UI updates
 //! - SHA256 hash verification
 //! - Timeout handling
+//!
+//! Windows-only: uses WinHTTP API. Cross-platform HTTP will be provided
+//! via the platform module.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use sha2::{Digest, Sha256};

@@ -1,4 +1,9 @@
 //! Environment variable management.
+//!
+//! Windows-only: uses Windows Registry for persistent env vars and
+//! WM_SETTINGCHANGE broadcast.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use tracing::{debug, info};

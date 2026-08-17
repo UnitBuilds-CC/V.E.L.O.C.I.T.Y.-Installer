@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 //! Dependency condition resolver.
 //!
 //! Delegates to the unified `condition` module for evaluating condition

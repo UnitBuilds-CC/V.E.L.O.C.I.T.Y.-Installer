@@ -1,8 +1,10 @@
 pub mod build;
 pub mod check;
+#[cfg(target_os = "windows")]
 pub mod dep;
 pub mod detect;
 pub mod info;
 pub mod init;
 pub mod sign;
+#[cfg(target_os = "windows")]
 pub mod update;

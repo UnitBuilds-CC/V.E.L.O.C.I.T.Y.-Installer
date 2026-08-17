@@ -3,6 +3,10 @@
 //! Uses Win32 named mutexes to detect if another instance of this installer
 //! is already running. This prevents conflicts from double-clicking the installer
 //! or running it from multiple command prompts.
+//!
+//! Windows-only: uses Win32 CreateMutexW/OpenMutexW API.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use tracing::{debug, info, warn};

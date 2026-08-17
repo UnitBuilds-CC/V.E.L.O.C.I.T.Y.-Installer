@@ -1,4 +1,8 @@
 //! UAC elevation — request administrator privileges.
+//!
+//! Windows-only: uses Win32 Security API and ShellExecuteEx for UAC elevation.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use std::os::windows::ffi::OsStrExt;

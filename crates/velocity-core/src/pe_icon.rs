@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 //! PE icon resource modification.
 //!
 //! Allows setting a custom icon on the installer .exe file.

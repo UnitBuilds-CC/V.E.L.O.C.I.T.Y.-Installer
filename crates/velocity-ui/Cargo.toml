@@ -9,11 +9,14 @@ repository.workspace = true
 [dependencies]
 velocity-config = { workspace = true }
 velocity-core = { workspace = true }
-windows = { workspace = true }
-webview2-com = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# Windows-only dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true }
+webview2-com = { workspace = true }
 winreg = { workspace = true }

@@ -1,6 +1,9 @@
 //! Velocity Installer — Wizard UI
 //!
 //! Provides both a modern (WebView2) and classic (Win32) installer wizard.
+//! Currently Windows-only. Cross-platform wizard UI using wry+tao is planned.
+
+#![cfg(target_os = "windows")]
 
 pub mod classic;
 pub mod error;

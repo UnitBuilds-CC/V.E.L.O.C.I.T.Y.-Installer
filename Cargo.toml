@@ -28,7 +28,7 @@ zstd = "0.13"
 tar = "0.4"
 lzma-rs = "0.3"
 
-# Windows APIs
+# Windows APIs (Windows-only)
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
@@ -48,6 +48,10 @@ windows = { version = "0.62", features = [
     "Win32_Networking_WinHttp",
 ] }
 winreg = "0.52"
+
+# Cross-platform
+getrandom = "0.2"
+dirs = "5"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -73,6 +77,8 @@ uuid = { version = "1", features = ["v4"] }
 aes-gcm = "0.10"
 webview2-com = "0.39"
 wasmtime = "24"
+wry = "0.48"
+tao = "0.31"
 
 # Internal crates
 velocity-config = { path = "crates/velocity-config" }

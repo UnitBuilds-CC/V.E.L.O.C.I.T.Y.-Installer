@@ -1,4 +1,8 @@
 //! Windows registry operations.
+//!
+//! Windows-only: uses the `winreg` crate for reading/writing the Windows Registry.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use tracing::{debug, info};

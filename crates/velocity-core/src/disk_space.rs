@@ -1,6 +1,12 @@
 //! Disk space validation before installation.
 //!
 //! Checks that the target drive has enough free space for the installation.
+//!
+//! Note: `get_free_disk_space` uses Win32 GetDiskFreeSpaceExW and is Windows-only.
+//! The entire module is cfg-gated; cross-platform disk space checking will be
+//! provided via the platform module.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use std::path::Path;

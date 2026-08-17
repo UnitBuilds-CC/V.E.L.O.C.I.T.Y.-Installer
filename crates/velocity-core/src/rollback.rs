@@ -113,18 +113,30 @@ impl RollbackTracker {
                         "ROLLBACK",
                         &format!("Removing registry: {}\\{}", root, path),
                     );
-                    // Actually remove the registry key
-                    let root_key = match root.as_str() {
-                        "HKLM" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE),
-                        "HKCU" => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER),
-                        "HKCR" => winreg::RegKey::predef(winreg::enums::HKEY_CLASSES_ROOT),
-                        "HKU" => winreg::RegKey::predef(winreg::enums::HKEY_USERS),
-                        _ => continue,
-                    };
-                    if let Err(e) = root_key.delete_subkey_all(&path) {
-                        let msg = format!("Failed to remove registry {}\\{}: {}", root, path, e);
-                        logging::log_error("ROLLBACK", &msg);
-                        failures.push(msg);
+                    #[cfg(target_os = "windows")]
+                    {
+                        // Actually remove the registry key
+                        let root_key = match root.as_str() {
+                            "HKLM" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE),
+                            "HKCU" => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER),
+                            "HKCR" => winreg::RegKey::predef(winreg::enums::HKEY_CLASSES_ROOT),
+                            "HKU" => winreg::RegKey::predef(winreg::enums::HKEY_USERS),
+                            _ => continue,
+                        };
+                        if let Err(e) = root_key.delete_subkey_all(&path) {
+                            let msg =
+                                format!("Failed to remove registry {}\\{}: {}", root, path, e);
+                            logging::log_error("ROLLBACK", &msg);
+                            failures.push(msg);
+                        }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let msg = format!(
+                            "Registry rollback not yet implemented on this platform: {}\\{}",
+                            root, path
+                        );
+                        logging::log_warning(&msg);
                     }
                 }
                 RollbackOp::ShortcutCreated(path) => {
@@ -146,52 +158,74 @@ impl RollbackTracker {
                         "ROLLBACK",
                         &format!("Removing env var: {} ({})", name, scope),
                     );
-                    // Actually remove the environment variable
-                    let root_key = match scope.as_str() {
-                        "system" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
-                            .open_subkey_with_flags(
-                                "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-                                winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
-                            )
-                            .ok(),
-                        _ => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-                            .open_subkey_with_flags(
-                                "Environment",
-                                winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
-                            )
-                            .ok(),
-                    };
-                    if let Some(key) = root_key {
-                        if let Err(e) = key.delete_value(&name) {
-                            let msg =
-                                format!("Failed to remove env var {} ({}): {}", name, scope, e);
-                            logging::log_error("ROLLBACK", &msg);
-                            failures.push(msg);
+                    #[cfg(target_os = "windows")]
+                    {
+                        // Actually remove the environment variable
+                        let root_key = match scope.as_str() {
+                            "system" => winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+                                .open_subkey_with_flags(
+                                    "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                                )
+                                .ok(),
+                            _ => winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+                                .open_subkey_with_flags(
+                                    "Environment",
+                                    winreg::enums::KEY_SET_VALUE | winreg::enums::KEY_READ,
+                                )
+                                .ok(),
+                        };
+                        if let Some(key) = root_key {
+                            if let Err(e) = key.delete_value(&name) {
+                                let msg =
+                                    format!("Failed to remove env var {} ({}): {}", name, scope, e);
+                                logging::log_error("ROLLBACK", &msg);
+                                failures.push(msg);
+                            }
                         }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let msg = format!(
+                            "Env var rollback not yet implemented on this platform: {} ({})",
+                            name, scope
+                        );
+                        logging::log_warning(&msg);
                     }
                 }
                 RollbackOp::ServiceInstalled(name) => {
                     logging::log_op("ROLLBACK", &format!("Removing service: {}", name));
-                    // Stop the service first, then delete it
-                    let _ = std::process::Command::new("sc")
-                        .args(["stop", &name])
-                        .output();
-                    match std::process::Command::new("sc")
-                        .args(["delete", &name])
-                        .output()
+                    #[cfg(target_os = "windows")]
                     {
-                        Ok(output) if output.status.success() => {}
-                        Ok(output) => {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            let msg = format!("Failed to remove service {}: {}", name, stderr);
-                            logging::log_error("ROLLBACK", &msg);
-                            failures.push(msg);
+                        // Stop the service first, then delete it
+                        let _ = std::process::Command::new("sc")
+                            .args(["stop", &name])
+                            .output();
+                        match std::process::Command::new("sc")
+                            .args(["delete", &name])
+                            .output()
+                        {
+                            Ok(output) if output.status.success() => {}
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                let msg = format!("Failed to remove service {}: {}", name, stderr);
+                                logging::log_error("ROLLBACK", &msg);
+                                failures.push(msg);
+                            }
+                            Err(e) => {
+                                let msg = format!("Failed to run sc delete for {}: {}", name, e);
+                                logging::log_error("ROLLBACK", &msg);
+                                failures.push(msg);
+                            }
                         }
-                        Err(e) => {
-                            let msg = format!("Failed to run sc delete for {}: {}", name, e);
-                            logging::log_error("ROLLBACK", &msg);
-                            failures.push(msg);
-                        }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let msg = format!(
+                            "Service rollback not yet implemented on this platform: {}",
+                            name
+                        );
+                        logging::log_warning(&msg);
                     }
                 }
             }

@@ -1,16 +1,39 @@
-//! Installer builder — compiles a project into a standalone installer .exe.
+//! Installer builder — compiles a project into a standalone installer binary.
+//!
+//! On Windows, produces a `.exe` installer.
+//! On Linux/macOS, produces a native binary or self-extracting archive.
 
 use crate::error::{CompilerError, Result};
 use std::path::{Path, PathBuf};
 use tracing::info;
 use velocity_config::collect_files;
 
+/// Platform-specific runtime binary name.
+fn runtime_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "velocity-runtime.exe"
+    } else {
+        "velocity-runtime"
+    }
+}
+
+/// Platform-specific installer output extension.
+fn installer_extension() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "exe"
+    } else if cfg!(target_os = "macos") {
+        "app"
+    } else {
+        "bin"
+    }
+}
+
 /// Options for the build process.
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
     /// Path to the project directory (containing velocity.toml)
     pub project_dir: PathBuf,
-    /// Output path for the installer .exe
+    /// Output path for the installer binary
     pub output_path: PathBuf,
     /// Compression level (0-22, default 3)
     pub compression_level: i32,
@@ -26,7 +49,7 @@ impl Default for BuildOptions {
     fn default() -> Self {
         Self {
             project_dir: std::env::current_dir().unwrap_or_default(),
-            output_path: PathBuf::from("output/installer.exe"),
+            output_path: PathBuf::from(format!("output/installer.{}", installer_extension())),
             compression_level: 3,
             compression_format: "zstd".to_string(),
             runtime_path: None,
@@ -187,17 +210,18 @@ fn find_or_build_runtime(options: &BuildOptions) -> Result<Vec<u8>> {
     }
 
     // Look for the runtime in common locations
+    let rt_name = runtime_binary_name();
     let candidates = [
         // In the workspace target directory (if building from source)
         options
             .project_dir
-            .join("target/release/velocity-runtime.exe"),
+            .join(format!("target/release/{}", rt_name)),
         options
             .project_dir
-            .join("target/debug/velocity-runtime.exe"),
+            .join(format!("target/debug/{}", rt_name)),
         // Relative to the compiler crate
-        PathBuf::from("target/release/velocity-runtime.exe"),
-        PathBuf::from("target/debug/velocity-runtime.exe"),
+        PathBuf::from(format!("target/release/{}", rt_name)),
+        PathBuf::from(format!("target/debug/{}", rt_name)),
     ];
 
     for candidate in &candidates {

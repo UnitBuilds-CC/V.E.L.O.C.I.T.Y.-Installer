@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 //! Windows service management.
 
 use crate::error::{CoreError, Result};

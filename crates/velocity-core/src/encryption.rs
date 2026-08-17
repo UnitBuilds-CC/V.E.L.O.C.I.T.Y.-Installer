@@ -193,21 +193,14 @@ fn generate_nonce() -> [u8; NONCE_SIZE] {
 }
 
 /// Fill a byte slice with cryptographically secure random bytes using
-/// `BCryptGenRandom` — the Windows built-in CSPRNG (backed by the OS kernel).
+/// the `getrandom` crate — cross-platform CSPRNG (BCryptGenRandom on Windows,
+/// getrandom syscall on Linux, getentropy on macOS).
 fn fill_random(buf: &mut [u8]) {
-    use windows::Win32::Security::Cryptography::{
-        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-    };
-
-    // SAFETY: BCryptGenRandom writes exactly buf.len() bytes into the provided
-    // buffer. The buffer is a valid mutable slice with correct length. The flag
-    // BCRYPT_USE_SYSTEM_PREFERRED_RNG selects the OS-preferred CSPRNG algorithm.
-    let result = unsafe { BCryptGenRandom(None, buf, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
-    if result.is_err() {
-        // Fallback: this should never happen on a functioning Windows system.
+    if getrandom::getrandom(buf).is_err() {
+        // Fallback: this should never happen on a functioning OS.
         // If it does, the encryption will still be correct but with
         // non-random salt/nonce (uniqueness degraded, not confidentiality).
-        tracing::error!("BCryptGenRandom failed — falling back to time-based randomness");
+        tracing::error!("getrandom failed — falling back to time-based randomness");
         use sha2::Digest;
         use std::time::{SystemTime, UNIX_EPOCH};
         let time_nanos = SystemTime::now()

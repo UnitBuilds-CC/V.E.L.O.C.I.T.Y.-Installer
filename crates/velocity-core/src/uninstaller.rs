@@ -1,13 +1,17 @@
 //! Uninstaller generation — creates a self-contained uninstall executable.
 
 use crate::error::{CoreError, Result};
-use crate::file_assoc;
 use crate::logging;
-use crate::registry;
-use crate::shortcuts;
 use std::path::Path;
 use tracing::info;
 use velocity_config::VelocityManifest;
+
+#[cfg(target_os = "windows")]
+use crate::file_assoc;
+#[cfg(target_os = "windows")]
+use crate::registry;
+#[cfg(target_os = "windows")]
+use crate::shortcuts;
 
 /// Generate an uninstaller executable.
 ///
@@ -75,43 +79,65 @@ pub fn perform_uninstall(info: &UninstallInfo) -> Result<()> {
     // Run pre-uninstall scripts
     for cmd in &info.pre_uninstall {
         logging::log_op("SCRIPT", cmd);
+        #[cfg(target_os = "windows")]
         let _ = std::process::Command::new("cmd").args(["/C", cmd]).output();
+        #[cfg(not(target_os = "windows"))]
+        let _ = std::process::Command::new("sh").args(["-c", cmd]).output();
     }
 
-    // Stop and remove services
-    if !info.services.is_empty() {
-        logging::log_op("UNINSTALL", "Removing services...");
-        let _ = crate::services::remove_services(&info.services);
+    // Windows-specific cleanup: services, env vars, file associations, registry, shortcuts
+    #[cfg(target_os = "windows")]
+    {
+        // Stop and remove services
+        if !info.services.is_empty() {
+            logging::log_op("UNINSTALL", "Removing services...");
+            let _ = crate::services::remove_services(&info.services);
+        }
+
+        // Remove environment variables
+        if !info.env_vars.is_empty() {
+            logging::log_op("UNINSTALL", "Removing environment variables...");
+            let _ = crate::env_vars::remove_env_vars(&info.env_vars);
+        }
+
+        // Remove file associations
+        if !info.file_associations.is_empty() {
+            logging::log_op("UNINSTALL", "Removing file associations...");
+            let _ = file_assoc::remove_file_associations(&info.file_associations);
+        }
+
+        // Remove registry entries
+        if !info.registry_entries.is_empty() {
+            logging::log_op("UNINSTALL", "Removing registry entries...");
+            let _ = registry::remove_registry_entries(&info.registry_entries);
+        }
+
+        // Remove shortcuts
+        logging::log_op("UNINSTALL", "Removing shortcuts...");
+        let _ = shortcuts::remove_shortcuts(
+            &info.shortcut_config,
+            &info.app_name,
+            info.start_menu_folder.as_deref(),
+        );
+
+        // Remove the uninstall registry entry
+        let _ = registry::remove_uninstall_entry(&info.app_name);
     }
 
-    // Remove environment variables
-    if !info.env_vars.is_empty() {
-        logging::log_op("UNINSTALL", "Removing environment variables...");
-        let _ = crate::env_vars::remove_env_vars(&info.env_vars);
+    // Non-Windows: remove .desktop files and config directories
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Remove .desktop files
+        let desktop_dir = crate::platform::start_menu_dir();
+        let desktop_file = desktop_dir.join(format!(
+            "{}.desktop",
+            info.app_name.to_lowercase().replace(' ', "-")
+        ));
+        if desktop_file.exists() {
+            let _ = std::fs::remove_file(&desktop_file);
+            logging::log_op("UNINSTALL", &format!("Removed: {}", desktop_file.display()));
+        }
     }
-
-    // Remove file associations
-    if !info.file_associations.is_empty() {
-        logging::log_op("UNINSTALL", "Removing file associations...");
-        let _ = file_assoc::remove_file_associations(&info.file_associations);
-    }
-
-    // Remove registry entries
-    if !info.registry_entries.is_empty() {
-        logging::log_op("UNINSTALL", "Removing registry entries...");
-        let _ = registry::remove_registry_entries(&info.registry_entries);
-    }
-
-    // Remove shortcuts
-    logging::log_op("UNINSTALL", "Removing shortcuts...");
-    let _ = shortcuts::remove_shortcuts(
-        &info.shortcut_config,
-        &info.app_name,
-        info.start_menu_folder.as_deref(),
-    );
-
-    // Remove the uninstall registry entry
-    let _ = registry::remove_uninstall_entry(&info.app_name);
 
     // Remove installed files
     let install_dir = Path::new(&info.install_dir);

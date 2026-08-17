@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 //! Dependency and bundled app installer orchestrator.
 //!
 //! Coordinates the full lifecycle:

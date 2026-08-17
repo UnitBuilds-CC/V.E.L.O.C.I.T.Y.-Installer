@@ -11,16 +11,34 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint & Format
+  # Lint & Format (all platforms)
   # ---------------------------------------------------------------------------
   lint:
-    name: Clippy & Format
-    runs-on: windows-latest
+    name: Clippy & Format (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+          - os: ubuntu-latest
+            label: Linux
+          - os: macos-latest
+            label: macOS
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      # Install Linux system dependencies for wry/tao (webkitgtk)
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev
+
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -28,14 +46,32 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
   # ---------------------------------------------------------------------------
-  # Unit & Integration Tests
+  # Unit & Integration Tests (all platforms)
   # ---------------------------------------------------------------------------
   test:
-    name: Test
-    runs-on: windows-latest
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+          - os: ubuntu-latest
+            label: Linux
+          - os: macos-latest
+            label: macOS
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      # Install Linux system dependencies for wry/tao (webkitgtk)
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev
+
       - uses: Swatinem/rust-cache@v2
 
       # Build the runtime first so e2e tests can find it
@@ -47,34 +83,58 @@ jobs:
         run: cargo test --workspace -- --include-ignored
 
   # ---------------------------------------------------------------------------
-  # Build Release
+  # Build Release (all platforms)
   # ---------------------------------------------------------------------------
   build:
-    name: Build Release
-    runs-on: windows-latest
+    name: Build Release (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            cli_name: velocity.exe
+            runtime_name: velocity-runtime.exe
+          - os: ubuntu-latest
+            label: Linux
+            cli_name: velocity
+            runtime_name: velocity-runtime
+          - os: macos-latest
+            label: macOS
+            cli_name: velocity
+            runtime_name: velocity-runtime
+    runs-on: ${{ matrix.os }}
     needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      # Install Linux system dependencies for wry/tao (webkitgtk)
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev
+
       - uses: Swatinem/rust-cache@v2
       - name: Build release binaries
         run: cargo build --release --workspace
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-cli
-          path: target/release/velocity.exe
+          name: velocity-cli-${{ matrix.label }}
+          path: target/release/${{ matrix.cli_name }}
       - name: Upload runtime
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-runtime
-          path: target/release/velocity-runtime.exe
+          name: velocity-runtime-${{ matrix.label }}
+          path: target/release/${{ matrix.runtime_name }}
 
   # ---------------------------------------------------------------------------
-  # Code Signing (only on tagged releases)
+  # Code Signing (only on tagged releases, per-platform)
   # ---------------------------------------------------------------------------
-  sign:
-    name: Code Signing
+  sign-windows:
+    name: Code Signing (Windows)
     runs-on: windows-latest
     needs: [build]
     if: startsWith(github.ref, 'refs/tags/')
@@ -82,11 +142,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: velocity-cli
+          name: velocity-cli-Windows
           path: artifacts
       - uses: actions/download-artifact@v4
         with:
-          name: velocity-runtime
+          name: velocity-runtime-Windows
           path: artifacts
 
       - name: Sign CLI binary
@@ -116,5 +176,92 @@ jobs:
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-signed
+          name: velocity-signed-windows
+          path: artifacts/
+
+  # ---------------------------------------------------------------------------
+  # Code Signing — macOS (only on tagged releases)
+  # ---------------------------------------------------------------------------
+  sign-macos:
+    name: Code Signing (macOS)
+    runs-on: macos-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-cli-macOS
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-runtime-macOS
+          path: artifacts
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_PASSWORD" ]; then
+            echo "No macOS signing certificate configured, skipping."
+            exit 0
+          fi
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+
+      - name: Sign binaries
+        run: |
+          chmod +x artifacts/velocity artifacts/velocity-runtime
+          codesign --force --deep --sign - artifacts/velocity
+          codesign --force --deep --sign - artifacts/velocity-runtime
+        shell: bash
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-signed-macos
+          path: artifacts/
+
+  # ---------------------------------------------------------------------------
+  # Code Signing — Linux (only on tagged releases, GPG)
+  # ---------------------------------------------------------------------------
+  sign-linux:
+    name: Code Signing (Linux)
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-cli-Linux
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: velocity-runtime-Linux
+          path: artifacts
+
+      - name: Sign binaries with GPG
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "No GPG key configured, skipping."
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          chmod +x artifacts/velocity artifacts/velocity-runtime
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 -ab artifacts/velocity
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 -ab artifacts/velocity-runtime
+        shell: bash
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-signed-linux
           path: artifacts/

@@ -2,6 +2,10 @@
 //!
 //! Creates and removes file type associations in the registry,
 //! enabling double-click to open files with the installed application.
+//!
+//! Windows-only: uses the Windows Registry (HKCR) for file associations.
+
+#![cfg(target_os = "windows")]
 
 use crate::error::{CoreError, Result};
 use crate::logging;
