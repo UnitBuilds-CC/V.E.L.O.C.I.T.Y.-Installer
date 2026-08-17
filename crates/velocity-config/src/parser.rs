@@ -348,4 +348,143 @@ version = "1.0.0"
         assert!(manifest.services.is_empty());
         assert!(manifest.file_associations.is_empty());
     }
+
+    // ================================================================
+    // Fuzz-like robustness tests
+    //
+    // These tests verify that parse_manifest_str NEVER panics on any
+    // input — it always returns Ok or Err gracefully. This is the
+    // key invariant for parser safety.
+    // ================================================================
+
+    /// Helper: assert that parsing returns Err (never panics).
+    fn assert_parse_err(input: &str) {
+        let result = parse_manifest_str(input);
+        assert!(result.is_err(), "Expected Err for input, got Ok");
+    }
+
+    /// Helper: the input may or may not parse, but must not panic.
+    fn assert_no_panic(input: &str) {
+        let _ = parse_manifest_str(input);
+    }
+
+    #[test]
+    fn fuzz_empty_and_whitespace() {
+        assert_parse_err("");
+        assert_parse_err("   ");
+        assert_parse_err("\n\n\n");
+        assert_parse_err("\t\t\t");
+        assert_parse_err("\r\n\r\n");
+    }
+
+    #[test]
+    fn fuzz_garbage_input() {
+        assert_no_panic("not toml at all");
+        assert_no_panic("{{{{{{{{{{{{");
+        assert_no_panic("}}}}}}}}}}}}");
+        assert_no_panic("[][][][][][]");
+        assert_no_panic("=====");
+        assert_no_panic("~~~~~");
+        assert_no_panic("```````");
+    }
+
+    #[test]
+    fn fuzz_truncated_toml() {
+        // Valid TOML prefix truncated at various points
+        assert_parse_err("[app");
+        assert_parse_err("[app]\nname");
+        assert_parse_err("[app]\nname =");
+        assert_parse_err("[app]\nname = \"");
+        assert_parse_err("[app]\nname = \"Test");
+        assert_parse_err("[app]\nname = \"Test\"");
+        // Missing version
+        assert_parse_err("[app]\nname = \"Test\"");
+    }
+
+    #[test]
+    fn fuzz_invalid_toml_syntax() {
+        assert_parse_err("[app]\nname = \"Test\"\nversion = 1.0.0"); // unquoted version
+        assert_parse_err("[app]\nname = Test"); // unquoted string
+        assert_parse_err("[app]\nname = [1, 2, 3]"); // array instead of string
+        assert_parse_err("[app]\nname = {{}}"); // inline table instead of string
+        assert_parse_err("[app\nname = \"Test\""); // missing closing bracket
+        assert_parse_err("app]\nname = \"Test\""); // missing opening bracket
+    }
+
+    #[test]
+    fn fuzz_unicode_chaos() {
+        // Various Unicode edge cases
+        assert_no_panic("日本語テスト");
+        assert_no_panic("[app]\nname = \"中文应用\"\nversion = \"1.0.0\"");
+        assert_no_panic("[app]\nname = \"🔥🚀💥\"\nversion = \"1.0.0\"");
+        assert_no_panic("\u{0000}\u{0001}\u{0002}");
+        assert_no_panic("\u{FEFF}[app]"); // BOM
+        assert_no_panic("name = \"\u{202E}rtl\u{202C}\""); // RTL override
+        assert_no_panic(&"A".repeat(100_000)); // Very long string
+    }
+
+    #[test]
+    fn fuzz_deeply_nested_tables() {
+        // Deeply nested tables shouldn't cause stack overflow
+        let mut input = String::new();
+        for i in 0..50 {
+            input.push_str(&format!("[level{}]\n", i));
+        }
+        assert_no_panic(&input);
+    }
+
+    #[test]
+    fn fuzz_duplicate_keys() {
+        assert_no_panic("[app]\nname = \"A\"\nname = \"B\"\nversion = \"1.0\"");
+    }
+
+    #[test]
+    fn fuzz_type_mismatches() {
+        // Fields with wrong types
+        assert_parse_err("[app]\nname = 42\nversion = \"1.0\"");
+        assert_parse_err("[app]\nname = \"Test\"\nversion = true");
+        assert_parse_err("[install]\nrequire_admin = \"yes\"");
+        assert_parse_err("[install]\ndefault_dir = [1, 2, 3]");
+    }
+
+    #[test]
+    fn fuzz_unknown_sections() {
+        // Unknown sections should be ignored by serde (or cause error, but not panic)
+        assert_no_panic(
+            "[app]\nname = \"Test\"\nversion = \"1.0\"\n\n[unknown_section]\nfoo = \"bar\"",
+        );
+    }
+
+    #[test]
+    fn fuzz_special_characters_in_strings() {
+        assert_no_panic("[app]\nname = \"Test\\nWith\\nNewlines\"\nversion = \"1.0\"");
+        assert_no_panic("[app]\nname = \"Test\\tWith\\tTabs\"\nversion = \"1.0\"");
+        assert_no_panic("[app]\nname = \"Test\\\\With\\\\Backslashes\"\nversion = \"1.0\"");
+        assert_no_panic("[app]\nname = \"Test\\\"With\\\"Quotes\"\nversion = \"1.0\"");
+    }
+
+    #[test]
+    fn fuzz_massive_array() {
+        // Large arrays in source field
+        let sources: Vec<String> = (0..1000).map(|i| format!("\"file_{}.txt\"", i)).collect();
+        let input = format!(
+            "[app]\nname = \"Test\"\nversion = \"1.0\"\n\n[files]\nsource = [{}]",
+            sources.join(", ")
+        );
+        assert_no_panic(&input);
+    }
+
+    #[test]
+    fn fuzz_many_registry_entries() {
+        let mut input = String::from("[app]\nname = \"Test\"\nversion = \"1.0\"\n");
+        for i in 0..100 {
+            input.push_str(&format!(
+                "\n[[registry]]\nkey = \"Software\\\\Test{}\"\nroot = \"HKCU\"\nname = \"key{}\"\nvalue = \"val{}\"\n",
+                i, i, i
+            ));
+        }
+        let result = parse_manifest_str(&input);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().registry.len(), 100);
+    }
 }
