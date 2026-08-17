@@ -1,13 +1,13 @@
 #!/usr/bin/env pwsh
-# Velocity Installer vs Inno Setup 6 — Benchmark Comparison
+# Velocity Installer vs Inno Setup 7 — Benchmark Comparison
 
 param([switch]$SkipInno)
 
 $ErrorActionPreference = "Stop"
 $sampleDir = $PSScriptRoot
 $projectRoot = Split-Path (Split-Path $sampleDir)
-$velocityExe = Join-Path $projectRoot "target\release\velocity.exe"
-$isccExe = "C:\Users\visse\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
+$velocityExe = Join-Path $projectRoot "target\debug\velocity.exe"
+$isccExe = "C:\Users\visse\AppData\Local\Programs\Inno Setup 7\ISCC.exe"
 $outputDir = Join-Path $sampleDir "benchmark-output"
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
@@ -17,7 +17,7 @@ function FMB($b) { return [math]::Round($b / 1048576, 2) }
 function FSZ($b) { return "$(FKB $b) KB ($(FMB $b) MB)" }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " Velocity vs Inno Setup 6 — Benchmark" -ForegroundColor Cyan
+Write-Host " Velocity vs Inno Setup 7 — Benchmark" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -58,7 +58,7 @@ $iSize = 0; $iSec = 0
 $iAvail = Test-Path $isccExe
 
 if (-not $SkipInno -and $iAvail) {
-    Write-Host "[2/4] Building Inno Setup 6 installer..." -ForegroundColor Yellow
+    Write-Host "[2/4] Building Inno Setup 7 installer..." -ForegroundColor Yellow
     $iOut = Join-Path $outputDir "sample-app-inno-setup.exe"
     $iLog = Join-Path $outputDir "inno-build-log.txt"
 
@@ -73,7 +73,7 @@ if (-not $SkipInno -and $iAvail) {
 } elseif ($SkipInno) {
     Write-Host "[2/4] Inno Setup skipped" -ForegroundColor DarkGray
 } else {
-    Write-Host "[2/4] Inno Setup 6 not found" -ForegroundColor Red
+    Write-Host "[2/4] Inno Setup 7 not found" -ForegroundColor Red
 }
 Write-Host ""
 
@@ -82,10 +82,10 @@ Write-Host "[3/4] Measuring build tool overhead..." -ForegroundColor Yellow
 $vBinSize = if (Test-Path $velocityExe) { (Get-Item $velocityExe).Length } else { 0 }
 $iToolSize = 0
 if ($iAvail) {
-    $iToolSize = (Get-ChildItem "C:\Users\visse\AppData\Local\Programs\Inno Setup 6" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+    $iToolSize = (Get-ChildItem "C:\Users\visse\AppData\Local\Programs\Inno Setup 7" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
 }
 Write-Host ("  Velocity CLI:  " + (FMB $vBinSize) + " MB - single binary, cross-platform")
-if ($iAvail) { Write-Host ("  Inno Setup 6:  " + (FMB $iToolSize) + " MB - Windows-only") }
+if ($iAvail) { Write-Host ("  Inno Setup 7:  " + (FMB $iToolSize) + " MB - Windows-only") }
 Write-Host ""
 
 # --- Step 4: Report ---
@@ -95,7 +95,7 @@ Write-Host ""
 $rpt = Join-Path $outputDir "benchmark-report.txt"
 $r = @()
 $r += "============================================================"
-$r += " Velocity Installer vs Inno Setup 6 — Benchmark Report"
+$r += " Velocity Installer vs Inno Setup 7 — Benchmark Report"
 $r += " Generated: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 $r += "============================================================"
 $r += ""
@@ -107,7 +107,7 @@ $r += "--- Package Size ---"
 $r += "  Velocity:      " + (FSZ $vSize)
 if ($iSize -gt 0) {
     $ratio = [math]::Round($vSize / $iSize * 100, 1)
-    $r += "  Inno Setup 6:  " + (FSZ $iSize)
+    $r += "  Inno Setup 7:  " + (FSZ $iSize)
     $r += "  Ratio:         $ratio% (Velocity / Inno)"
 }
 $r += ""
@@ -115,7 +115,7 @@ $r += "--- Build Time ---"
 $r += "  Velocity:      ${vSec}s"
 if ($iSec -gt 0) {
     $tRatio = [math]::Round($vSec / $iSec * 100, 1)
-    $r += "  Inno Setup 6:  ${iSec}s"
+    $r += "  Inno Setup 7:  ${iSec}s"
     $r += "  Ratio:         $tRatio% (Velocity / Inno)"
 }
 $r += ""
@@ -124,15 +124,15 @@ $vComp = if ($rawSize -gt 0) { [math]::Round($vSize / $rawSize * 100, 1) } else 
 $r += "  Velocity:      $vComp% of raw size"
 if ($iSize -gt 0 -and $rawSize -gt 0) {
     $iComp = [math]::Round($iSize / $rawSize * 100, 1)
-    $r += "  Inno Setup 6:  $iComp% of raw size"
+    $r += "  Inno Setup 7:  $iComp% of raw size"
 }
 $r += ""
 $r += "--- Build Tool Overhead ---"
 $r += "  Velocity CLI:  " + (FMB $vBinSize) + " MB - single binary, cross-platform"
-if ($iAvail) { $r += "  Inno Setup 6:  " + (FMB $iToolSize) + " MB - Windows-only" }
+if ($iAvail) { $r += "  Inno Setup 7:  " + (FMB $iToolSize) + " MB - Windows-only" }
 $r += ""
 $r += "--- Feature Comparison ---"
-$r += "  Feature                  | Velocity      | Inno Setup 6"
+$r += "  Feature                  | Velocity      | Inno Setup 7"
 $r += "  -------------------------|---------------|----------------"
 $r += "  Cross-platform           | Yes (W/L/M)   | Windows only"
 $r += "  Config format            | TOML          | Pascal Script"

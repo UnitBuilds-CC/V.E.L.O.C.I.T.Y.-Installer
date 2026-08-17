@@ -1,4 +1,4 @@
-; Inno Setup 6 script for Sample App — benchmark comparison with Velocity
+; Inno Setup 7 script for Sample App — benchmark comparison with Velocity
 ; Build: iscc innosetup-sample-app.iss
 
 #define MyAppName "Sample App"
