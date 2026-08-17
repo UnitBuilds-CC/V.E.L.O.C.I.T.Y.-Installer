@@ -26,6 +26,7 @@ toml = "0.8"
 # Compression
 zstd = "0.13"
 tar = "0.4"
+lzma-rs = "0.3"
 
 # Windows APIs
 windows = { version = "0.58", features = [

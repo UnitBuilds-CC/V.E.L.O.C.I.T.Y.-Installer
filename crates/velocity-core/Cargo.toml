@@ -12,6 +12,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 zstd = { workspace = true }
 tar = { workspace = true }
+lzma-rs = { workspace = true }
 windows = { workspace = true }
 winreg = { workspace = true }
 thiserror = { workspace = true }
