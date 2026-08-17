@@ -47,6 +47,8 @@ pub fn auto_generate(project_dir: &Path) -> Result<VelocityManifest> {
         env_vars: Vec::new(),
         services: Vec::new(),
         file_associations: Vec::new(),
+        dependencies: Vec::new(),
+        bundled_apps: Vec::new(),
     };
 
     debug!("Auto-generated manifest: {:?}", manifest.app.name);

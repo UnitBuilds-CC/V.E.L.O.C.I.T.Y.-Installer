@@ -2,8 +2,8 @@
 //!
 //! Handles file extraction, registry operations, shortcut creation,
 //! service management, environment variables, uninstaller generation,
-//! disk space validation, rollback, logging, file associations, and
-//! process detection.
+//! disk space validation, rollback, logging, file associations,
+//! process detection, HTTP downloading, and dependency management.
 
 pub mod extract;
 pub mod registry;
@@ -19,6 +19,9 @@ pub mod rollback;
 pub mod file_assoc;
 pub mod process_detect;
 pub mod pe_icon;
+pub mod downloader;
+pub mod dep_resolver;
+pub mod dep_installer;
 pub mod error;
 
 pub use error::*;

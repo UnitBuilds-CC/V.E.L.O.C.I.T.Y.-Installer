@@ -104,6 +104,20 @@ enum Commands {
         #[arg(short = 'v', long)]
         verify: bool,
     },
+
+    /// Manage remote dependencies and bundled applications
+    Dep {
+        /// Subcommand: list, add, resolve, remove
+        subcommand: String,
+
+        /// Path to velocity.toml
+        #[arg(short = 'c', long, default_value = "velocity.toml")]
+        config: String,
+
+        /// Additional arguments for the subcommand
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -164,6 +178,13 @@ fn main() -> Result<()> {
                     description.as_deref(),
                 )?;
             }
+        }
+        Commands::Dep {
+            subcommand,
+            config,
+            args,
+        } => {
+            commands::dep::run(&subcommand, &config, &args)?;
         }
     }
 

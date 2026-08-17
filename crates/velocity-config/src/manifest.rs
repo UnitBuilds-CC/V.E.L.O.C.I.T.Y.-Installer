@@ -40,6 +40,12 @@ pub struct VelocityManifest {
     /// File type associations
     #[serde(default)]
     pub file_associations: Vec<FileAssociationEntry>,
+    /// Remote dependencies to download and install (e.g., VC++ Redist, DirectX)
+    #[serde(default)]
+    pub dependencies: Vec<DependencyEntry>,
+    /// Third-party applications bundled with the installer
+    #[serde(default)]
+    pub bundled_apps: Vec<BundledAppEntry>,
 }
 
 /// Application metadata.
@@ -403,6 +409,71 @@ pub struct FileAssociationEntry {
     pub open_command: String,
 }
 
+/// Remote dependency to download and install.
+///
+/// Supports downloading installers from URLs and running them silently.
+/// Common uses: VC++ Redistributables, DirectX, .NET Framework, etc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyEntry {
+    /// Human-readable name (e.g., "VC++ 2015-2022 Redistributable")
+    pub name: String,
+    /// Download URL (https)
+    pub url: String,
+    /// Expected SHA256 hash for integrity verification
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// Command-line arguments for silent installation
+    #[serde(default)]
+    pub install_args: String,
+    /// Condition expression — only install if this evaluates to true.
+    ///
+    /// Supported conditions:
+    /// - `"always"` — always install
+    /// - `"registry_missing:HKLM\\Software\\..."` — install if registry key is absent
+    /// - `"registry_exists:HKLM\\Software\\..."` — install if registry key exists
+    /// - `"file_missing:C:\\path\\to\\file.dll"` — install if file doesn't exist
+    /// - `"file_exists:C:\\path\\to\\file.dll"` — install if file exists
+    /// - `"not_installed:ProductName"` — install if not in Add/Remove Programs
+    #[serde(default = "default_dep_condition")]
+    pub condition: String,
+    /// Installation order priority (lower = earlier). Default 100.
+    #[serde(default = "default_dep_priority")]
+    pub priority: u32,
+    /// Whether this dependency is required (fails install if it fails)
+    #[serde(default = "default_true")]
+    pub required: bool,
+    /// File type hint: "exe", "msi", "msm" — determines how to invoke it
+    #[serde(default = "default_dep_type")]
+    pub file_type: String,
+}
+
+/// Third-party application bundled with the installer.
+///
+/// The installer file is included in the payload and executed during install.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundledAppEntry {
+    /// Human-readable name (e.g., "7-Zip")
+    pub name: String,
+    /// Path to the installer file relative to the project root.
+    /// This file will be included in the payload automatically.
+    pub installer: String,
+    /// Command-line arguments for silent installation
+    #[serde(default)]
+    pub install_args: String,
+    /// Condition expression (same format as DependencyEntry)
+    #[serde(default = "default_dep_condition")]
+    pub condition: String,
+    /// Installation order priority (lower = earlier). Default 200.
+    #[serde(default = "default_bundled_priority")]
+    pub priority: u32,
+    /// Whether this bundled app is required
+    #[serde(default)]
+    pub required: bool,
+    /// Working directory for the installer (default: temp dir)
+    #[serde(default)]
+    pub working_dir: Option<String>,
+}
+
 // ─── Default value functions ─────────────────────────────────────────────────
 
 fn default_install_dir() -> String {
@@ -455,4 +526,20 @@ fn default_start_type() -> String {
 
 fn default_open_command() -> String {
     "\"%1\"".to_string()
+}
+
+fn default_dep_condition() -> String {
+    "always".to_string()
+}
+
+fn default_dep_priority() -> u32 {
+    100
+}
+
+fn default_bundled_priority() -> u32 {
+    200
+}
+
+fn default_dep_type() -> String {
+    "exe".to_string()
 }

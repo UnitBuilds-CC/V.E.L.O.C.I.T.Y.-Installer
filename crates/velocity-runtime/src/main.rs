@@ -279,6 +279,69 @@ fn main() -> Result<()> {
     info!("Extracted {} files", extracted.len());
     logging::log_success(&format!("Extracted {} files", extracted.len()));
 
+    // Step 7.5: Install remote dependencies and bundled apps
+    let temp_dir = std::env::temp_dir().join("velocity_installer");
+    std::fs::create_dir_all(&temp_dir)?;
+
+    if !manifest.dependencies.is_empty() {
+        info!("Installing remote dependencies...");
+        logging::log_op("DEPS", &format!("Processing {} dependencies(s)", manifest.dependencies.len()));
+        let dep_results = velocity_core::dep_installer::install_dependencies(
+            &manifest.dependencies,
+            &temp_dir,
+            &mut rollback,
+        );
+        // Log summary
+        let installed = dep_results.iter().filter(|r| r.installed).count();
+        let skipped = dep_results.iter().filter(|r| r.skipped).count();
+        let failed = dep_results.iter().filter(|r| r.error.is_some()).count();
+        logging::log_op("DEPS", &format!("{} installed, {} skipped, {} failed", installed, skipped, failed));
+
+        // Check if any required dependency failed
+        if !velocity_core::dep_installer::all_required_installed(&dep_results, &manifest.dependencies) {
+            error!("Required dependency installation failed");
+            logging::log_error("DEPS", "Required dependency failed, rolling back");
+            let _ = rollback.rollback();
+            if !args.silent {
+                velocity_ui::classic::show_error(
+                    "Dependency Installation Failed",
+                    "One or more required dependencies could not be installed.\n\n\
+                    The installation has been rolled back.\n\n\
+                    Check the log file for details.",
+                );
+            }
+            return Err(anyhow::anyhow!("Required dependency installation failed"));
+        }
+    }
+
+    if !manifest.bundled_apps.is_empty() {
+        info!("Installing bundled applications...");
+        logging::log_op("BUNDLED", &format!("Processing {} bundled app(s)", manifest.bundled_apps.len()));
+        // Build a map of payload files for bundled app lookup
+        let mut payload_map = std::collections::HashMap::new();
+        for file in extracted.iter() {
+            // Use the relative path from the archive
+            let rel = file.strip_prefix(install_dir)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            payload_map.insert(rel, file.clone());
+        }
+        let bundled_results = velocity_core::dep_installer::install_bundled_apps(
+            &manifest.bundled_apps,
+            &payload_map,
+            &temp_dir,
+            &mut rollback,
+        );
+        let installed = bundled_results.iter().filter(|r| r.installed).count();
+        let skipped = bundled_results.iter().filter(|r| r.skipped).count();
+        let failed = bundled_results.iter().filter(|r| r.error.is_some()).count();
+        logging::log_op("BUNDLED", &format!("{} installed, {} skipped, {} failed", installed, skipped, failed));
+    }
+
+    // Clean up temp directory
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
     // Step 8: Create variable resolver for path substitution
     let mut resolver = velocity_config::VariableResolver::new(install_dir);
     resolver.set_variable("version", &manifest.app.version);
