@@ -41,6 +41,8 @@ struct RuntimeArgs {
     password: Option<String>,
     /// Force modern WebView2 wizard regardless of manifest theme.
     modern_ui: bool,
+    /// Elevated process — skip wizard, use dir from args.
+    elevated: bool,
 }
 
 impl RuntimeArgs {
@@ -51,12 +53,14 @@ impl RuntimeArgs {
         let mut force = false;
         let mut password = None;
         let mut modern_ui = false;
+        let mut elevated = false;
 
         for arg in args.iter().skip(1) {
             match arg.as_str() {
                 "/S" | "/s" | "--silent" | "-s" | "/quiet" | "-q" => silent = true,
                 "--force" | "-f" => force = true,
                 "--modern" | "--webview" => modern_ui = true,
+                "--elevated" => elevated = true,
                 _ => {
                     // Check for /D= prefix (Inno Setup compatible directory override)
                     if arg.starts_with("/D=") || arg.starts_with("/d=") {
@@ -74,6 +78,7 @@ impl RuntimeArgs {
             force,
             password,
             modern_ui,
+            elevated,
         }
     }
 }

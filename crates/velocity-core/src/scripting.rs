@@ -375,9 +375,12 @@ fn run_shell(cmd: &str, work_dir: Option<&str>) -> Result<std::process::Output> 
     let dir = work_dir.unwrap_or(".");
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         std::process::Command::new("cmd")
             .args(["/C", cmd])
             .current_dir(dir)
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| CoreError::other("shell command", format!("{}: {}", cmd, e)))
     }

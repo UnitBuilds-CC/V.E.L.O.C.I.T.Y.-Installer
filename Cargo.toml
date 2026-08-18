@@ -8,6 +8,7 @@ members = [
     "crates/velocity-compiler",
     "crates/velocity-runtime",
     "crates/velocity-plugin-api",
+    "crates/velocity-msi",
 ]
 
 [workspace.package]
@@ -72,7 +73,8 @@ walkdir = "2"
 fs2 = "0.4"
 
 # Windows Installer (MSI)
-msi = "0.7"
+# Using patched fork with OLE V3 and Windows-1252 fixes
+msi = { path = "../rust-msi" }
 cab = "0.4"
 
 # Misc
@@ -93,6 +95,7 @@ velocity-core = { path = "crates/velocity-core" }
 velocity-ui = { path = "crates/velocity-ui" }
 velocity-compiler = { path = "crates/velocity-compiler" }
 velocity-plugin-api = { path = "crates/velocity-plugin-api" }
+velocity-msi = { path = "crates/velocity-msi" }
 
 [profile.release]
 opt-level = "z"

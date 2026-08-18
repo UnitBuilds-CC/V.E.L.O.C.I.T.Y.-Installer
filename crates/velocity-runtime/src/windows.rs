@@ -179,9 +179,24 @@ pub(super) fn run() -> Result<()> {
             }
         };
 
-    // Step 2: Show the installation wizard (or use defaults in silent mode)
-    let wizard_result = if args.silent {
-        // Silent mode: use defaults
+    // Step 2: Check if elevation is needed (before wizard, so wizard has admin privileges)
+    if manifest.install.require_admin && !velocity_core::elevation::is_admin() && !args.silent {
+        // Elevate before showing wizard - wizard will run with admin privileges
+        let cmd_args = std::env::args().collect::<Vec<_>>();
+        match velocity_core::elevation::elevate_if_needed(&cmd_args)? {
+            true => {
+                // Elevated process started, exit this one
+                return Ok(());
+            }
+            false => {
+                // Already elevated
+            }
+        }
+    }
+
+    // Step 3: Show the installation wizard (or use defaults in silent/elevated mode)
+    let wizard_result = if args.silent || args.elevated {
+        // Silent or elevated mode: use directory from args or defaults
         let install_dir = args.dir.clone().unwrap_or_else(|| {
             // Use architecture-aware path resolution
             let default_path = velocity_config::VariableResolver::new(&std::path::PathBuf::from(
@@ -254,20 +269,6 @@ pub(super) fn run() -> Result<()> {
     }
 
     logging::log_op("INSTALL", &format!("Target: {}", install_dir.display()));
-
-    // Step 3: Check if elevation is needed
-    if manifest.install.require_admin && !velocity_core::elevation::is_admin() {
-        let cmd_args = std::env::args().collect::<Vec<_>>();
-        match velocity_core::elevation::elevate_if_needed(&cmd_args)? {
-            true => {
-                // Elevated process started, exit this one
-                return Ok(());
-            }
-            false => {
-                // Already elevated
-            }
-        }
-    }
 
     // Step 4: Check if app is already running
     if let Some(ref main_exe) = manifest.install.run_after_install {
@@ -809,16 +810,10 @@ pub(super) fn run() -> Result<()> {
         logging::log_warning("A system reboot is required to complete the installation.");
     }
 
-    // Step 17: Show completion
-    let should_launch = if !args.silent {
-        velocity_ui::classic::show_finish_dialog(
-            &manifest.app.name,
-            install_dir,
-            manifest.install.run_after_install.as_deref(),
-        )
-    } else {
-        wizard_result.launch_after
-    };
+    // Step 17: Determine if we should launch the app
+    // The wizard already showed the Finished page, so no extra dialog needed.
+    // Just use the launch_after value from the wizard (or silent mode default).
+    let should_launch = wizard_result.launch_after;
 
     // Step 18: Launch application if requested
     if should_launch {
@@ -1000,10 +995,18 @@ fn install_crash_handler() {
             }
         }
 
-        // Console output
-        eprintln!("FATAL: Installer crashed at {}\n{}", location, payload);
-        eprintln!("Crash report written to: {}", crash_file.display());
-        eprintln!("Crash summary: {}", summary_file.display());
+        // Console output — only in debug mode (release has no console)
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("FATAL: Installer crashed at {}\n{}", location, payload);
+            eprintln!("Crash report written to: {}", crash_file.display());
+            eprintln!("Crash summary: {}", summary_file.display());
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = crash_file;
+            let _ = summary_file;
+        }
     }));
 }
 

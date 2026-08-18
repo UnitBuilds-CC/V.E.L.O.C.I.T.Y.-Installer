@@ -64,7 +64,7 @@ where
     #[cfg(target_os = "windows")]
     {
         match manifest.ui.theme.as_str() {
-            "classic" => run_classic(manifest),
+            "classic" => run_classic(manifest, _payload_data),
             "modern" | "native" => {
                 tracing::info!("Using native Win32 wizard for theme: {}", manifest.ui.theme);
                 run_native_with_payload(manifest, _payload_data)
@@ -88,20 +88,9 @@ where
 // Windows-specific wizard implementations
 // ===========================================================================
 #[cfg(target_os = "windows")]
-fn run_classic(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
-    let result = crate::classic::run_classic_wizard(manifest)?;
-
-    if result.cancelled {
-        return Err(UiError::Cancelled);
-    }
-
-    Ok(InstallWizardResult {
-        install_dir: result.install_dir,
-        cancelled: false,
-        launch_after: result.launch_after,
-        selected_components: Vec::new(),
-        install_completed: false,
-    })
+fn run_classic(manifest: &VelocityManifest, payload_data: Option<Vec<u8>>) -> Result<InstallWizardResult> {
+    // Classic theme uses the native single-window wizard with simpler styling
+    run_native_with_payload_and_style(manifest, payload_data, true)
 }
 
 #[cfg(target_os = "windows")]
@@ -109,7 +98,16 @@ fn run_native_with_payload(
     manifest: &VelocityManifest,
     payload_data: Option<Vec<u8>>,
 ) -> Result<InstallWizardResult> {
-    let result = crate::native_wizard::run_native_wizard(manifest, payload_data)?;
+    run_native_with_payload_and_style(manifest, payload_data, false)
+}
+
+#[cfg(target_os = "windows")]
+fn run_native_with_payload_and_style(
+    manifest: &VelocityManifest,
+    payload_data: Option<Vec<u8>>,
+    classic_style: bool,
+) -> Result<InstallWizardResult> {
+    let result = crate::native_wizard::run_native_wizard(manifest, payload_data, classic_style)?;
 
     if result.cancelled {
         return Err(UiError::Cancelled);
@@ -180,7 +178,7 @@ fn run_webview(manifest: &VelocityManifest) -> Result<InstallWizardResult> {
                  Falling back to the classic wizard. To install WebView2, visit:\n\
                  https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
             );
-            run_classic(manifest)
+            run_classic(manifest, None)
         }
         Err(e) => Err(e),
     }
