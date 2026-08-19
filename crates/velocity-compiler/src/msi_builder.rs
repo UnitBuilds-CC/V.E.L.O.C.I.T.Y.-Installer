@@ -92,12 +92,43 @@ pub fn build_msi(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Ms
 
     let mut builder = VelocityMsi::new();
 
-    // Generate GUIDs
-    let product_code = Uuid::new_v4().to_string();
+    // Generate deterministic GUIDs using SHA-1 hash
+    // This ensures the same product+version always gets the same ProductCode,
+    // allowing uninstall via the MSI file even after rebuilds.
+    use sha1::{Sha1, Digest};
+    
+    // ProductCode: deterministic based on name + version + arch
+    // Format: {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} (uppercase with braces)
+    let product_code_input = format!("{} {} {}", manifest.app.name, manifest.app.version, options.architecture);
+    let mut hasher = Sha1::new();
+    hasher.update(product_code_input.as_bytes());
+    let hash = hasher.finalize();
+    let product_code = format!(
+        "{{{:08X}-{:04X}-{:04X}-{:04X}-{:012X}}}",
+        u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]),
+        u16::from_be_bytes([hash[4], hash[5]]),
+        u16::from_be_bytes([hash[6], hash[7]]) & 0x0FFF | 0x5000, // Version 5 UUID
+        u16::from_be_bytes([hash[8], hash[9]]) & 0x3FFF | 0x8000, // Variant 1
+        u64::from_be_bytes([0, 0, hash[10], hash[11], hash[12], hash[13], hash[14], hash[15]])
+    );
+    
+    // UpgradeCode: deterministic based on name only (stays same across versions)
     let upgrade_code = options
         .upgrade_code
         .clone()
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+        .unwrap_or_else(|| {
+            let mut hasher = Sha1::new();
+            hasher.update(format!("{}-upgrade", manifest.app.name).as_bytes());
+            let hash = hasher.finalize();
+            format!(
+                "{{{:08X}-{:04X}-{:04X}-{:04X}-{:012X}}}",
+                u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]),
+                u16::from_be_bytes([hash[4], hash[5]]),
+                u16::from_be_bytes([hash[6], hash[7]]) & 0x0FFF | 0x5000,
+                u16::from_be_bytes([hash[8], hash[9]]) & 0x3FFF | 0x8000,
+                u64::from_be_bytes([0, 0, hash[10], hash[11], hash[12], hash[13], hash[14], hash[15]])
+            )
+        });
 
     info!("ProductCode: {}", product_code);
     info!("UpgradeCode: {}", upgrade_code);
