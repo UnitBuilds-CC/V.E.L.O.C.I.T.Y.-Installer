@@ -322,6 +322,17 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cfb"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b390793e912300f1aa713429f7fd0c391024e6c18b988962558bc4f96a349b1f"
+dependencies = [
+ "byteorder",
+ "fnv",
+ "uuid",
+]
+
+[[package]]
+name = "cfb"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a347dcabdae9c31b0825fd6a8bed285ec9c2acb89c47827126d52fa4f59cece3"
@@ -2038,6 +2049,18 @@ checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
 dependencies = [
  "adler2",
  "simd-adler32",
+]
+
+[[package]]
+name = "msi"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "226b2404f03d2cf47375b9715c8adfae4e388bb2377cff908e8a40f31e421514"
+dependencies = [
+ "byteorder",
+ "cfb 0.9.0",
+ "encoding_rs",
+ "uuid",
 ]
 
 [[package]]
@@ -3846,9 +3869,10 @@ dependencies = [
 name = "velocity-msi"
 version = "0.1.0"
 dependencies = [
- "cfb",
+ "cfb 0.14.0",
  "chrono",
  "encoding_rs",
+ "msi",
  "tempfile",
  "thiserror 1.0.69",
  "uuid",

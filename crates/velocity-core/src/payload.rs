@@ -150,7 +150,7 @@ fn read_trailer(file: &mut std::fs::File, file_len: u64) -> Result<u64> {
     file.seek(SeekFrom::Start(marker_offset))?;
     let mut marker_buf = [0u8; 16];
     file.read_exact(&mut marker_buf)?;
-    if &marker_buf != PAYLOAD_MARKER.as_slice() {
+    if marker_buf != PAYLOAD_MARKER.as_slice() {
         return Err(CoreError::InvalidPayload(
             "Trailer offset does not point to a valid marker".to_string(),
         ));

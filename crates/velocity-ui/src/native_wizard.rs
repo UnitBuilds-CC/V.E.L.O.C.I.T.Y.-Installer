@@ -30,7 +30,7 @@ const BTN_FINISH: u16 = 1005;
 const PROGRESS_BAR_ID: u16 = 1006;
 const EDIT_LICENSE_ID: u16 = 1013;
 const EDIT_DIR_ID: u16 = 1014;
-const LIST_COMPONENTS_ID: u16 = 1015;
+const _LIST_COMPONENTS_ID: u16 = 1015;
 const STATIC_FILE_ID: u16 = 1016;
 const CHK_LAUNCH_ID: u16 = 1017;
 const STATIC_SPACE_ID: u16 = 1018;
@@ -117,8 +117,8 @@ struct WizardData {
     dpi_scale: f32,
     h_page_title: HWND,
     h_page_desc: HWND,
-    h_sidebar_title: HWND,
-    h_sidebar_ver: HWND,
+    _h_sidebar_title: HWND,
+    _h_sidebar_ver: HWND,
     h_license: HWND,
     h_dir_edit: HWND,
     h_browse: HWND,
@@ -147,14 +147,14 @@ mod layout {
     pub const MIN_WIN_H: i32 = 480;
 
     // --- Sidebar (classic only) ---
-    pub const SIDEBAR_W: i32 = 150;
-    pub const SIDEBAR_PAD: i32 = 12;
+    pub const _SIDEBAR_W: i32 = 150;
+    pub const _SIDEBAR_PAD: i32 = 12;
 
     // --- Content area margins ---
     pub const MODERN_MARGIN_L: i32 = 24;
     pub const MODERN_MARGIN_R: i32 = 24;
-    pub const CLASSIC_CONTENT_X: i32 = 162;
-    pub const CLASSIC_CONTENT_PAD_R: i32 = 38;
+    pub const _CLASSIC_CONTENT_X: i32 = 162;
+    pub const _CLASSIC_CONTENT_PAD_R: i32 = 38;
 
     // --- Header ---
     pub const TITLE_Y: i32 = 16;
@@ -186,7 +186,7 @@ mod layout {
     // --- Font sizes (logical pixels) ---
     pub const FONT_TITLE: i32 = 18;
     pub const FONT_BODY: i32 = 13;
-    pub const FONT_SMALL: i32 = 11;
+    pub const _FONT_SMALL: i32 = 11;
 
     // --- Branding ---
     pub const BRAND_H: i32 = 16;
@@ -199,15 +199,15 @@ mod layout {
 /// Computed layout for the current window state.
 /// All values are in physical (DPI-scaled) pixels.
 struct WizardLayout {
-    dpi_scale: f32,
-    classic: bool,
-    client_w: i32,
-    client_h: i32,
+    _dpi_scale: f32,
+    _classic: bool,
+    _client_w: i32,
+    _client_h: i32,
     // Sidebar
-    sidebar_w: i32,
+    _sidebar_w: i32,
     // Content area
     content_x: i32,
-    content_y: i32,
+    _content_y: i32,
     content_w: i32,
     // Header
     title_x: i32,
@@ -228,12 +228,13 @@ struct WizardLayout {
     // Separator line
     sep_y: i32,
     // Branding
-    brand_y: i32,
+    _brand_y: i32,
 }
 
 impl WizardLayout {
+    #[allow(dead_code)]
     fn s(&self, v: i32) -> i32 {
-        (v as f32 * self.dpi_scale) as i32
+        (v as f32 * self._dpi_scale) as i32
     }
 
     /// Compute layout from client area dimensions.
@@ -271,13 +272,13 @@ impl WizardLayout {
         let brand_y = client_h - s(layout::BRAND_H) - s(4);
 
         WizardLayout {
-            dpi_scale,
-            classic,
-            client_w,
-            client_h,
-            sidebar_w,
+            _dpi_scale: dpi_scale,
+            _classic: classic,
+            _client_w: client_w,
+            _client_h: client_h,
+            _sidebar_w: sidebar_w,
             content_x,
-            content_y: body_y,
+            _content_y: body_y,
             content_w,
             title_x,
             title_y,
@@ -293,12 +294,12 @@ impl WizardLayout {
             next_x,
             cancel_x,
             sep_y,
-            brand_y,
+            _brand_y: brand_y,
         }
     }
 
     /// Calculate the required window height for a given number of components.
-    fn required_height(num_components: usize, classic: bool, dpi_scale: f32) -> i32 {
+    fn required_height(num_components: usize, _classic: bool, dpi_scale: f32) -> i32 {
         let s = |v: i32| -> i32 { (v as f32 * dpi_scale) as i32 };
 
         // Header: title + desc + padding
@@ -343,8 +344,8 @@ struct WizardStrings {
     dir_desc: String,
     components_title: String,
     components_desc: String,
-    ready_title: String,
-    ready_desc: String,
+    _ready_title: String,
+    _ready_desc: String,
     install_title: String,
     install_desc: String,
     finish_title: String,
@@ -377,8 +378,8 @@ impl WizardStrings {
             dir_desc: loc.get("wizard_select_dir_subtitle", &[("app_name", app_name)]),
             components_title: loc.get_simple("wizard_components_title"),
             components_desc: loc.get_simple("wizard_components_subtitle"),
-            ready_title: loc.get_simple("wizard_ready_title"),
-            ready_desc: loc.get("wizard_ready_subtitle", &[("app_name", app_name)]),
+            _ready_title: loc.get_simple("wizard_ready_title"),
+            _ready_desc: loc.get("wizard_ready_subtitle", &[("app_name", app_name)]),
             install_title: loc.get_simple("wizard_install_title"),
             install_desc: loc.get("wizard_install_subtitle", &[("app_name", app_name)]),
             finish_title: loc.get_simple("wizard_finish_title"),
@@ -405,8 +406,8 @@ impl WizardStrings {
             dir_desc: format!("Choose where to install {}", app_name),
             components_title: "Select Components".into(),
             components_desc: "Choose which features to install".into(),
-            ready_title: "Ready to Install".into(),
-            ready_desc: format!("Click Install to begin installing {} to your computer.", app_name),
+            _ready_title: "Ready to Install".into(),
+            _ready_desc: format!("Click Install to begin installing {} to your computer.", app_name),
             install_title: "Installing".into(),
             install_desc: format!("Please wait while {} is installed.", app_name),
             finish_title: "Installation Complete".into(),
@@ -634,8 +635,8 @@ fn run_wizard_window(
             dpi_scale: scale,
             h_page_title: HWND::default(),
             h_page_desc: HWND::default(),
-            h_sidebar_title: HWND::default(),
-            h_sidebar_ver: HWND::default(),
+            _h_sidebar_title: HWND::default(),
+            _h_sidebar_ver: HWND::default(),
             h_license: HWND::default(),
             h_dir_edit: HWND::default(),
             h_browse: HWND::default(),
@@ -800,7 +801,7 @@ unsafe extern "system" fn wizard_wnd_proc(
         }
         WM_CTLCOLORSTATIC => {
             let hdc = HDC(wparam.0 as *mut _);
-            let target = HWND(lparam.0 as *mut _);
+            let _target = HWND(lparam.0 as *mut _);
             if !dp.is_null() {
                 let d = &*dp;
                 if !d.classic_style {
@@ -1044,7 +1045,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
     // Compute layout from actual client area
     let mut client_rect = RECT::default();
     let _ = GetClientRect(parent, &mut client_rect);
-    let L = WizardLayout::compute(client_rect.right, client_rect.bottom, d.dpi_scale, d.classic_style);
+    let lay = WizardLayout::compute(client_rect.right, client_rect.bottom, d.dpi_scale, d.classic_style);
     let s = |v: i32| -> i32 { (v as f32 * d.dpi_scale) as i32 };
 
     // --- Page title ---
@@ -1053,7 +1054,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("STATIC"),
         w!("Welcome"),
         WS_CHILD | WS_VISIBLE,
-        L.title_x, L.title_y, L.title_w, s(layout::TITLE_H),
+        lay.title_x, lay.title_y, lay.title_w, s(layout::TITLE_H),
         Some(parent), Some(HMENU(PAGE_TITLE_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_page_title, true);
@@ -1064,20 +1065,20 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("STATIC"),
         w!("Click Next to begin."),
         WS_CHILD | WS_VISIBLE,
-        L.desc_x, L.desc_y, L.desc_w, s(layout::DESC_H),
+        lay.desc_x, lay.desc_y, lay.desc_w, s(layout::DESC_H),
         Some(parent), Some(HMENU(PAGE_DESC_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_page_desc, false);
 
     // --- License edit (hidden) ---
     let license_style = ws(WS_CHILD.0 | WS_VSCROLL.0 | 0x0004 | 0x0800 | 0x0040);
-    let license_h = L.sep_y - L.body_y - s(layout::CONTROL_GAP);
+    let license_h = lay.sep_y - lay.body_y - s(layout::CONTROL_GAP);
     d.h_license = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         w!("EDIT"),
         w!(""),
         license_style,
-        L.content_x, L.body_y, L.content_w, license_h.max(s(100)),
+        lay.content_x, lay.body_y, lay.content_w, license_h.max(s(100)),
         Some(parent), Some(HMENU(EDIT_LICENSE_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_license, false);
@@ -1086,13 +1087,13 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
     let dw = wn(&d.default_dir);
     let dir_style = ws(WS_CHILD.0 | 0x0080);
     let browse_w = s(layout::BTN_BROWSE_W);
-    let dir_w = L.content_w - browse_w - s(layout::BROWSE_GAP);
+    let dir_w = lay.content_w - browse_w - s(layout::BROWSE_GAP);
     d.h_dir_edit = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         w!("EDIT"),
         PCWSTR(dw.as_ptr()),
         dir_style,
-        L.content_x, L.body_y, dir_w, s(layout::EDIT_H),
+        lay.content_x, lay.body_y, dir_w, s(layout::EDIT_H),
         Some(parent), Some(HMENU(EDIT_DIR_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_dir_edit, false);
@@ -1103,7 +1104,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         w!("B&rowse..."),
         WS_CHILD | WS_TABSTOP,
-        L.content_x + dir_w + s(layout::BROWSE_GAP), L.body_y, browse_w, s(layout::EDIT_H),
+        lay.content_x + dir_w + s(layout::BROWSE_GAP), lay.body_y, browse_w, s(layout::EDIT_H),
         Some(parent), Some(HMENU(BTN_BROWSE as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_browse, false);
@@ -1119,9 +1120,9 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
             w!("BUTTON"),
             PCWSTR(cw.as_ptr()),
             chk_style,
-            L.content_x, L.body_y, // Placeholder — repositioned in show_page
-            L.content_w, s(layout::CHK_H),
-            Some(parent), Some(HMENU((3000 + i) as usize as *mut _)), Some(hi), None,
+            lay.content_x, lay.body_y, // Placeholder — repositioned in show_page
+            lay.content_w, s(layout::CHK_H),
+            Some(parent), Some(HMENU((3000 + i) as *mut _)), Some(hi), None,
         ).unwrap_or_default();
         set_font(h_chk, false);
         if node.selected {
@@ -1142,7 +1143,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("STATIC"),
         w!(""),
         WS_CHILD,
-        L.content_x, L.body_y, L.content_w, s(layout::LABEL_H), // Placeholder
+        lay.content_x, lay.body_y, lay.content_w, s(layout::LABEL_H), // Placeholder
         Some(parent), Some(HMENU(STATIC_SPACE_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_txt(d.h_space_label, &space_text);
@@ -1154,7 +1155,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("msctls_progress32"),
         w!(""),
         WS_CHILD,
-        L.content_x, L.body_y, L.content_w, s(layout::PROGRESS_H),
+        lay.content_x, lay.body_y, lay.content_w, s(layout::PROGRESS_H),
         Some(parent), Some(HMENU(PROGRESS_BAR_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     SendMessageW(d.h_progress, PBM_SETRANGE32, Some(WPARAM(0)), Some(LPARAM(100)));
@@ -1165,8 +1166,8 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("STATIC"),
         w!(""),
         WS_CHILD,
-        L.content_x, L.body_y + s(layout::PROGRESS_H) + s(layout::CONTROL_GAP),
-        L.content_w, s(layout::LABEL_H),
+        lay.content_x, lay.body_y + s(layout::PROGRESS_H) + s(layout::CONTROL_GAP),
+        lay.content_w, s(layout::LABEL_H),
         Some(parent), Some(HMENU(STATIC_FILE_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_file_label, false);
@@ -1178,8 +1179,8 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         w!("Launch application after install"),
         launch_style,
-        L.content_x, L.body_y, // Placeholder — repositioned in show_page
-        L.content_w.min(s(350)), s(layout::CHK_H),
+        lay.content_x, lay.body_y, // Placeholder — repositioned in show_page
+        lay.content_w.min(s(350)), s(layout::CHK_H),
         Some(parent), Some(HMENU(CHK_LAUNCH_ID as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_launch_chk, false);
@@ -1197,7 +1198,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         PCWSTR(back_w.as_ptr()),
         WS_CHILD | WS_TABSTOP | WS_VISIBLE,
-        L.back_x, L.btn_y, L.btn_w, L.btn_h,
+        lay.back_x, lay.btn_y, lay.btn_w, lay.btn_h,
         Some(parent), Some(HMENU(BTN_BACK as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_back, false);
@@ -1207,7 +1208,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         PCWSTR(next_w.as_ptr()),
         WS_CHILD | WS_TABSTOP | WS_VISIBLE,
-        L.next_x, L.btn_y, L.btn_w, L.btn_h,
+        lay.next_x, lay.btn_y, lay.btn_w, lay.btn_h,
         Some(parent), Some(HMENU(BTN_NEXT as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_next, false);
@@ -1217,7 +1218,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         PCWSTR(cancel_w.as_ptr()),
         WS_CHILD | WS_TABSTOP | WS_VISIBLE,
-        L.cancel_x, L.btn_y, L.btn_w, L.btn_h,
+        lay.cancel_x, lay.btn_y, lay.btn_w, lay.btn_h,
         Some(parent), Some(HMENU(BTN_CANCEL as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_cancel, false);
@@ -1227,7 +1228,7 @@ unsafe fn create_controls(parent: HWND, d: &mut WizardData) {
         w!("BUTTON"),
         w!("&Finish"),
         WS_CHILD | WS_TABSTOP,
-        L.next_x, L.btn_y, L.btn_w, L.btn_h,
+        lay.next_x, lay.btn_y, lay.btn_w, lay.btn_h,
         Some(parent), Some(HMENU(BTN_FINISH as *mut _)), Some(hi), None,
     ).unwrap_or_default();
     set_font(d.h_finish, false);
@@ -1242,18 +1243,18 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
     // Compute layout from current client area
     let mut client_rect = RECT::default();
     let _ = GetClientRect(hwnd, &mut client_rect);
-    let L = WizardLayout::compute(client_rect.right, client_rect.bottom, d.dpi_scale, d.classic_style);
+    let lay = WizardLayout::compute(client_rect.right, client_rect.bottom, d.dpi_scale, d.classic_style);
     let s = |v: i32| -> i32 { (v as f32 * d.dpi_scale) as i32 };
 
     // --- Reposition header controls ---
-    move_ctrl(d.h_page_title, L.title_x, L.title_y, L.title_w, s(layout::TITLE_H));
-    move_ctrl(d.h_page_desc, L.desc_x, L.desc_y, L.desc_w, s(layout::DESC_H));
+    move_ctrl(d.h_page_title, lay.title_x, lay.title_y, lay.title_w, s(layout::TITLE_H));
+    move_ctrl(d.h_page_desc, lay.desc_x, lay.desc_y, lay.desc_w, s(layout::DESC_H));
 
     // --- Reposition buttons to bottom ---
-    move_ctrl(d.h_back, L.back_x, L.btn_y, L.btn_w, L.btn_h);
-    move_ctrl(d.h_next, L.next_x, L.btn_y, L.btn_w, L.btn_h);
-    move_ctrl(d.h_cancel, L.cancel_x, L.btn_y, L.btn_w, L.btn_h);
-    move_ctrl(d.h_finish, L.next_x, L.btn_y, L.btn_w, L.btn_h);
+    move_ctrl(d.h_back, lay.back_x, lay.btn_y, lay.btn_w, lay.btn_h);
+    move_ctrl(d.h_next, lay.next_x, lay.btn_y, lay.btn_w, lay.btn_h);
+    move_ctrl(d.h_cancel, lay.cancel_x, lay.btn_y, lay.btn_w, lay.btn_h);
+    move_ctrl(d.h_finish, lay.next_x, lay.btn_y, lay.btn_w, lay.btn_h);
 
     let is_finished = page == WizardPage::Finished;
 
@@ -1299,10 +1300,10 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
     }
 
     // --- Position and show controls for current page ---
-    let body_y = L.body_y;
-    let content_x = L.content_x;
-    let content_w = L.content_w;
-    let available_h = L.sep_y - body_y - s(layout::CONTROL_GAP);
+    let body_y = lay.body_y;
+    let content_x = lay.content_x;
+    let content_w = lay.content_w;
+    let available_h = lay.sep_y - body_y - s(layout::CONTROL_GAP);
 
     match page {
         WizardPage::Welcome => {
@@ -1375,13 +1376,13 @@ unsafe fn show_page(hwnd: HWND, d: &mut WizardData) {
             let hdc = GetDC(Some(d.h_page_desc));
             let hfont = SendMessageW(d.h_page_desc, WM_GETFONT, Some(WPARAM(0)), Some(LPARAM(0)));
             let old_font = SelectObject(hdc, HGDIOBJ(hfont.0 as *mut _));
-            let mut rc = RECT { left: 0, top: 0, right: L.desc_w, bottom: 0 };
+            let mut rc = RECT { left: 0, top: 0, right: lay.desc_w, bottom: 0 };
             let mut desc_buf = wn(&ready_desc);
             let _ = DrawTextW(hdc, &mut desc_buf, &mut rc, DT_WORDBREAK | DT_CALCRECT);
             let _ = SelectObject(hdc, old_font);
             let _ = ReleaseDC(Some(d.h_page_desc), hdc);
             let desc_h = (rc.bottom - rc.top).max(s(layout::DESC_H));
-            move_ctrl(d.h_page_desc, L.desc_x, L.desc_y, L.desc_w, desc_h);
+            move_ctrl(d.h_page_desc, lay.desc_x, lay.desc_y, lay.desc_w, desc_h);
             // Launch checkbox is NOT shown here — only on the Finished page
         }
         WizardPage::Installing => {
@@ -1679,7 +1680,7 @@ unsafe fn paint_modern_background(hwnd: HWND, d: &WizardData) {
             bottom: step_y + step_size,
         };
         
-        if i < d.page_idx as usize {
+        if i < d.page_idx {
             // Completed step: filled accent color
             let brush = CreateSolidBrush(accent_color);
             let _ = FillRect(hdc, &step_rect, brush);
@@ -1687,7 +1688,7 @@ unsafe fn paint_modern_background(hwnd: HWND, d: &WizardData) {
         } else if i == d.page_idx {
             // Current step: accent border, dark fill
             let brush = CreateSolidBrush(accent_color);
-            let pen = CreatePen(PS_SOLID, s(2) as i32, accent_color);
+            let pen = CreatePen(PS_SOLID, s(2), accent_color);
             let old_brush = SelectObject(hdc, brush.into());
             let old_pen = SelectObject(hdc, pen.into());
             let _ = Rectangle(hdc, step_rect.left, step_rect.top, step_rect.right, step_rect.bottom);
@@ -1698,7 +1699,7 @@ unsafe fn paint_modern_background(hwnd: HWND, d: &WizardData) {
         } else {
             // Future step: dark gray border
             let brush = CreateSolidBrush(COLORREF(0x003E3E42));
-            let pen = CreatePen(PS_SOLID, s(1) as i32, COLORREF(0x00555555));
+            let pen = CreatePen(PS_SOLID, s(1), COLORREF(0x00555555));
             let old_brush = SelectObject(hdc, brush.into());
             let old_pen = SelectObject(hdc, pen.into());
             let _ = Rectangle(hdc, step_rect.left, step_rect.top, step_rect.right, step_rect.bottom);
