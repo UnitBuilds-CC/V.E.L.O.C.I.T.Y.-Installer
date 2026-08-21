@@ -17,6 +17,9 @@ Desktop.ini
 *.vel
 *.velpkg
 
+# Generated installer output
+examples/*/output/
+
 # Environment
 .env
 .env.local
