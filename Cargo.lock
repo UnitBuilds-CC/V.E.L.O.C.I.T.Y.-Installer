@@ -3901,9 +3901,11 @@ dependencies = [
 name = "velocity-msi"
 version = "0.1.0"
 dependencies = [
+ "cab",
  "cfb 0.14.0",
  "chrono",
  "encoding_rs",
+ "flate2",
  "msi",
  "tempfile",
  "thiserror 1.0.69",

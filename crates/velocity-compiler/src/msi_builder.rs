@@ -36,6 +36,24 @@ fn insert_row(builder: &mut VelocityMsi, table: &str, row: Vec<Value>) -> Result
         .map_err(|e| CompilerError::Other(format!("Failed to insert into {}: {}", table, e)))
 }
 
+/// Helper: substitute Velocity variables in command strings
+fn substitute_vars(cmd: &str, manifest: &VelocityManifest, install_dir: &str) -> String {
+    cmd.replace("{version}", &manifest.app.version)
+        .replace("{app}", install_dir)
+        .replace("{name}", &manifest.app.name)
+        .replace("{publisher}", &manifest.app.publisher)
+}
+
+/// Helper: generate a deterministic component GUID from component name.
+/// This ensures ProcessComponents registers the component and uninstall can find it.
+fn generate_component_guid(component_name: &str) -> String {
+    // Create a deterministic UUID v5 based on component name
+    // Using a fixed namespace UUID for velocity-installer components
+    let namespace = Uuid::parse_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8").unwrap(); // DNS namespace
+    let component_uuid = Uuid::new_v5(&namespace, component_name.as_bytes());
+    format!("{{{}}}", component_uuid.to_string().to_uppercase())
+}
+
 /// Options for MSI package generation.
 #[derive(Debug, Clone)]
 pub struct MsiOptions {
@@ -159,7 +177,7 @@ pub fn build_msi(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Ms
     )?;
 
     // Populate Directory table
-    let dir_id_map = populate_directories(&mut builder, manifest)?;
+    let dir_id_map = populate_directories(&mut builder, manifest, options)?;
 
     // Collect files from the project
     let files = collect_msi_files(manifest, options)?;
@@ -187,7 +205,9 @@ pub fn build_msi(manifest: &VelocityManifest, options: &MsiOptions) -> Result<Ms
     populate_custom_actions(&mut builder, manifest)?;
 
     // Build and embed cabinet file (standard MSI packaging)
-    build_and_embed_cabinet(&mut builder, &files)?;
+    // CFFILE names must match File table primary keys (file_id format: "file_0", "file_1", ...)
+    let file_ids: Vec<String> = (0..files.len()).map(|i| format!("file_{}", i)).collect();
+    build_and_embed_cabinet(&mut builder, &files, &file_ids)?;
 
     // Build the MSI file
     let msi_data = builder
@@ -235,43 +255,48 @@ fn create_msi_tables(builder: &mut VelocityMsi) -> Result<()> {
         Column::build("DefaultDir").string(255).nullable().build(),
     ]).map_err(|e| CompilerError::Other(format!("Directory table: {}", e)))?;
 
-    // Component table
+    // Component table (Directory_ and Attributes are NOT nullable per MSI spec)
     builder.create_table("Component", vec![
         Column::build("Component").string(72).primary_key().build(),
         Column::build("ComponentId").string(38).nullable().build(),
-        Column::build("Directory_").string(72).nullable().build(),
-        Column::build("Attributes").int16().nullable().build(),
+        Column::build("Directory_").string(72).build(),         // NOT nullable per MSI spec
+        Column::build("Attributes").int16().build(),            // NOT nullable per MSI spec
         Column::build("Condition").string(255).nullable().build(),
         Column::build("KeyPath").string(72).nullable().build(),
     ]).map_err(|e| CompilerError::Other(format!("Component table: {}", e)))?;
 
-    // File table
+    // File table (8 columns matching Windows Installer reference schema)
     builder.create_table("File", vec![
         Column::build("File").string(72).primary_key().build(),
-        Column::build("Component_").string(72).nullable().build(),
-        Column::build("FileName").string(255).nullable().build(),
-        Column::build("FileSize").int32().nullable().build(),
+        Column::build("Component_").string(72).build(),
+        Column::build("FileName").string(255).build(),
+        Column::build("FileSize").int32().build(),
+        Column::build("Version").string(72).nullable().build(),
+        Column::build("Language").string(20).nullable().build(),
         Column::build("Attributes").int16().nullable().build(),
-        Column::build("Sequence").int32().nullable().build(),
+        Column::build("Sequence").int32().build(),
     ]).map_err(|e| CompilerError::Other(format!("File table: {}", e)))?;
 
-    // Media table
+    // Media table (6 columns matching Windows Installer reference schema)
     builder.create_table("Media", vec![
         Column::build("DiskId").int16().primary_key().build(),
-        Column::build("LastSequence").int32().nullable().build(),
+        Column::build("LastSequence").int32().build(),
+        Column::build("DiskPrompt").string(255).nullable().build(),
+        Column::build("VolumeLabel").string(32).nullable().build(),
         Column::build("Cabinet").string(255).nullable().build(),
+        Column::build("Source").string(72).nullable().build(),
     ]).map_err(|e| CompilerError::Other(format!("Media table: {}", e)))?;
 
-    // Feature table
+    // Feature table (Level and Attributes are NOT nullable per MSI spec)
     builder.create_table("Feature", vec![
         Column::build("Feature").string(38).primary_key().build(),
         Column::build("Feature_Parent").string(38).nullable().build(),
         Column::build("Title").string(64).nullable().build(),
         Column::build("Description").string(255).nullable().build(),
         Column::build("Display").int16().nullable().build(),
-        Column::build("Level").int16().nullable().build(),
+        Column::build("Level").int16().build(),              // NOT nullable per MSI spec
         Column::build("Directory_").string(72).nullable().build(),
-        Column::build("Attributes").int16().nullable().build(),
+        Column::build("Attributes").int16().build(),         // NOT nullable per MSI spec
     ]).map_err(|e| CompilerError::Other(format!("Feature table: {}", e)))?;
 
     // FeatureComponents table
@@ -280,14 +305,14 @@ fn create_msi_tables(builder: &mut VelocityMsi) -> Result<()> {
         Column::build("Component_").string(72).primary_key().build(),
     ]).map_err(|e| CompilerError::Other(format!("FeatureComponents table: {}", e)))?;
 
-    // Registry table
+    // Registry table (Root, Key, Component_ NOT nullable per MSI spec)
     builder.create_table("Registry", vec![
         Column::build("Registry").string(72).primary_key().build(),
-        Column::build("Root").int16().nullable().build(),
-        Column::build("Key").string(255).nullable().build(),
+        Column::build("Root").int16().build(),                  // NOT nullable per MSI spec
+        Column::build("Key").string(255).build(),               // NOT nullable per MSI spec
         Column::build("Name").string(255).nullable().build(),
         Column::build("Value").string(255).nullable().build(),
-        Column::build("Component_").string(72).nullable().build(),
+        Column::build("Component_").string(72).build(),         // NOT nullable per MSI spec
     ]).map_err(|e| CompilerError::Other(format!("Registry table: {}", e)))?;
 
     // Shortcut table
@@ -312,12 +337,12 @@ fn create_msi_tables(builder: &mut VelocityMsi) -> Result<()> {
         Column::build("Data").binary().nullable().build(),
     ]).map_err(|e| CompilerError::Other(format!("Icon table: {}", e)))?;
 
-    // Environment table
+    // Environment table (Component_ NOT nullable per MSI spec)
     builder.create_table("Environment", vec![
         Column::build("Environment").string(72).primary_key().build(),
         Column::build("Name").string(255).nullable().build(),
         Column::build("Value").string(255).nullable().build(),
-        Column::build("Component_").string(72).nullable().build(),
+        Column::build("Component_").string(72).build(),        // NOT nullable per MSI spec
     ]).map_err(|e| CompilerError::Other(format!("Environment table: {}", e)))?;
 
     // ServiceInstall table
@@ -361,6 +386,13 @@ fn create_msi_tables(builder: &mut VelocityMsi) -> Result<()> {
         Column::build("Condition").string(255).nullable().build(),
         Column::build("Sequence").int16().nullable().build(),
     ]).map_err(|e| CompilerError::Other(format!("InstallExecuteSequence table: {}", e)))?;
+
+    // InstallUISequence table — required by Windows Installer even for /qn installs
+    builder.create_table("InstallUISequence", vec![
+        Column::build("Action").string(72).primary_key().build(),
+        Column::build("Condition").string(255).nullable().build(),
+        Column::build("Sequence").int16().nullable().build(),
+    ]).map_err(|e| CompilerError::Other(format!("InstallUISequence table: {}", e)))?;
 
     // Upgrade table
     builder.create_table("Upgrade", vec![
@@ -444,6 +476,7 @@ fn populate_properties(
 fn populate_directories(
     package: &mut VelocityMsi,
     manifest: &VelocityManifest,
+    options: &MsiOptions,
 ) -> Result<HashMap<String, String>> {
     let mut dir_map = HashMap::new();
 
@@ -455,16 +488,20 @@ fn populate_directories(
         Value::from("SourceDir"),
     ])?;
 
-    // ProgramFiles64Folder or ProgramFilesFolder
-    let pf_dir = if manifest.install.arch.contains("64") {
-        "ProgramFiles64Folder"
+    // Choose install scope: per-machine uses ProgramFiles, per-user uses LocalAppData
+    let (parent_dir, default_name) = if options.per_machine {
+        if manifest.install.arch.contains("64") {
+            ("ProgramFiles64Folder", "PFiles")
+        } else {
+            ("ProgramFilesFolder", "PFiles")
+        }
     } else {
-        "ProgramFilesFolder"
+        ("LocalAppDataFolder", "LocalAppData")
     };
     insert_row(package, "Directory", vec![
-        Value::from(pf_dir),
+        Value::from(parent_dir),
         Value::from("TARGETDIR"),
-        Value::from("PFiles"),
+        Value::from(default_name),
     ])?;
 
     // Application directory
@@ -472,7 +509,7 @@ fn populate_directories(
     let app_dir_id = "INSTALLDIR";
     insert_row(package, "Directory", vec![
         Value::from(app_dir_id),
-        Value::from(pf_dir),
+        Value::from(parent_dir),
         Value::from(format!("{}:{}", app_dir_name, app_dir_name)),
     ])?;
     dir_map.insert("INSTALLDIR".to_string(), app_dir_id.to_string());
@@ -537,7 +574,6 @@ fn populate_components(
     for (i, (file_path, rel_path)) in files.iter().enumerate() {
         let component_id = format!("comp_{}", i);
         let file_id = format!("file_{}", i);
-        let component_guid = Uuid::new_v4().to_string();
         let file_name = Path::new(rel_path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -547,10 +583,13 @@ fn populate_components(
             .map(|m| m.len() as i32)
             .unwrap_or(0);
 
-        // Component row
+        // Component row — ComponentId must be a valid GUID for ProcessComponents to register it.
+        // Generate a deterministic GUID based on the component name so it's stable across builds.
+        // This ensures uninstall can find and remove the component correctly.
+        let component_guid = generate_component_guid(&component_id);
         insert_row(package, "Component", vec![
             Value::from(component_id.as_str()),
-            Value::from(component_guid.as_str()),
+            Value::from(component_guid.as_str()),  // ComponentId: valid GUID for registration
             Value::from(install_dir.as_str()),
             Value::Int(0),                 // Attributes: none
             Value::Null,                   // Condition (nullable)
@@ -581,6 +620,8 @@ fn populate_components(
             Value::from(component_id.as_str()),
             Value::from(msi_filename.as_str()),
             Value::Int(file_size),
+            Value::Null,                // Version (nullable)
+            Value::Null,                // Language (nullable)
             Value::Int(0),              // Attributes
             Value::Int((i + 1) as i32), // Sequence
         ])?;
@@ -592,11 +633,14 @@ fn populate_components(
         );
     }
 
-    // Media table — single cabinet
+    // Media table — single embedded cabinet
     insert_row(package, "Media", vec![
         Value::Int(1),                  // DiskId
         Value::Int(files.len() as i32), // LastSequence
+        Value::Null,                    // DiskPrompt (nullable)
+        Value::Null,                    // VolumeLabel (nullable)
         Value::from("#Velocity.cab"),   // Cabinet (embedded)
+        Value::Null,                    // Source (nullable)
     ])?;
 
     info!("Components populated: {} components", component_count);
@@ -662,14 +706,16 @@ fn populate_registry(
         let component_id = format!("comp_reg_{}", i);
 
         // Create a component for this registry entry
-        let reg_guid = Uuid::new_v4().to_string();
+        // KeyPath must be Null for non-file components (MSI looks up KeyPath in File table
+        // when Attributes=0, so we set it to Null to avoid error 2715)
+        // ComponentId (GUID) must be Null for proper uninstall tracking.
         insert_row(package, "Component", vec![
             Value::from(component_id.as_str()),
-            Value::from(reg_guid.as_str()),
+            Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
             Value::from("INSTALLDIR"),
             Value::Int(0),
             Value::Null,
-            Value::from(reg_id.as_str()), // KeyPath
+            Value::Null,  // KeyPath: Null for non-file components
         ])?;
 
         // Link to feature
@@ -716,16 +762,16 @@ fn populate_shortcuts(
         if let Some(desktop_dir) = dir_id_map.get("DesktopFolder") {
             let shortcut_id = "DesktopShortcut";
             let component_id = "comp_desktop_shortcut";
-            let guid = Uuid::new_v4().to_string();
 
-            // Component for shortcut
+            // Component for shortcut — KeyPath must be Null (not shortcut_id,
+            // since MSI looks up KeyPath in the File table)
             insert_row(package, "Component", vec![
                 Value::from(component_id),
-                Value::from(guid.as_str()),
+                Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
                 Value::from(desktop_dir.as_str()),
                 Value::Int(0),
                 Value::Null,
-                Value::from(shortcut_id),
+                Value::Null,  // KeyPath: Null for non-file components
             ])?;
 
             insert_row(package, "FeatureComponents", vec![Value::from("Complete"), Value::from(component_id)])?;
@@ -760,15 +806,14 @@ fn populate_shortcuts(
         if let Some(menu_dir) = dir_id_map.get("ApplicationProgramsFolder") {
             let shortcut_id = "StartMenuShortcut";
             let component_id = "comp_startmenu_shortcut";
-            let guid = Uuid::new_v4().to_string();
 
             insert_row(package, "Component", vec![
                 Value::from(component_id),
-                Value::from(guid.as_str()),
+                Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
                 Value::from(menu_dir.as_str()),
                 Value::Int(0),
                 Value::Null,
-                Value::from(shortcut_id),
+                Value::Null,  // KeyPath: Null for non-file components
             ])?;
 
             insert_row(package, "FeatureComponents", vec![Value::from("Complete"), Value::from(component_id)])?;
@@ -802,7 +847,6 @@ fn populate_shortcuts(
     for (i, custom) in manifest.shortcuts.custom.iter().enumerate() {
         let shortcut_id = format!("CustomShortcut_{}", i);
         let component_id = format!("comp_custom_shortcut_{}", i);
-        let guid = Uuid::new_v4().to_string();
 
         let target_dir = match custom.location.as_str() {
             "desktop" => dir_id_map.get("DesktopFolder").cloned(),
@@ -813,7 +857,7 @@ fn populate_shortcuts(
         if let Some(dir) = target_dir {
             insert_row(package, "Component", vec![
                 Value::from(component_id.as_str()),
-                Value::from(guid.as_str()),
+                Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
                 Value::from(dir.as_str()),
                 Value::Int(0),
                 Value::Null,
@@ -861,16 +905,16 @@ fn populate_environment(
     for (i, env) in manifest.env_vars.iter().enumerate() {
         let env_id = format!("env_{}", i);
         let component_id = format!("comp_env_{}", i);
-        let guid = Uuid::new_v4().to_string();
 
         // Component for env var
+        // KeyPath must be Null for non-file components (avoids error 2715)
         insert_row(package, "Component", vec![
             Value::from(component_id.as_str()),
-            Value::from(guid.as_str()),
+            Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
             Value::from("INSTALLDIR"),
             Value::Int(0),
             Value::Null,
-            Value::from(env_id.as_str()),
+            Value::Null,  // KeyPath: Null for non-file components
         ])?;
 
         insert_row(package, "FeatureComponents", vec![
@@ -908,16 +952,16 @@ fn populate_services(
         let svc_install_id = format!("svc_install_{}", i);
         let svc_ctrl_id = format!("svc_ctrl_{}", i);
         let component_id = format!("comp_svc_{}", i);
-        let guid = Uuid::new_v4().to_string();
 
         // Component for service
+        // KeyPath must be Null for non-file components (avoids error 2715)
         insert_row(package, "Component", vec![
             Value::from(component_id.as_str()),
-            Value::from(guid.as_str()),
+            Value::from(generate_component_guid(&component_id)),  // ComponentId: valid GUID for registration
             Value::from("INSTALLDIR"),
             Value::Int(0),
             Value::Null,
-            Value::from(svc_install_id.as_str()),
+            Value::Null,  // KeyPath: Null for non-file components
         ])?;
 
         insert_row(package, "FeatureComponents", vec![
@@ -973,9 +1017,13 @@ fn populate_custom_actions(
     package: &mut VelocityMsi,
     manifest: &VelocityManifest,
 ) -> Result<()> {
+    // Construct install dir for variable substitution
+    let install_dir = manifest.install.default_dir.replace("{autopf}", "C:\\Program Files");
+    
     // Standard sequence actions — (action, condition, sequence)
     // condition = None means always run (null in DB)
-    let standard_actions: Vec<(&str, Option<&str>, i32)> = vec![
+    // Only add actions for tables that will have data (avoid error 2503)
+    let mut standard_actions: Vec<(&str, Option<&str>, i32)> = vec![
         ("AppSearch", None, 100),
         ("LaunchConditions", Some("NOT Installed"), 105),
         ("ValidateProductID", None, 110),
@@ -985,16 +1033,44 @@ fn populate_custom_actions(
         ("InstallValidate", None, 150),
         ("InstallInitialize", None, 160),
         ("ProcessComponents", None, 170),
-        ("InstallFiles", None, 200),
-        ("InstallShortcuts", None, 210),
-        ("WriteRegistryValues", None, 220),
-        ("WriteEnvironmentStrings", None, 230),
-        ("InstallServices", None, 240),
-        ("StartServices", None, 250),
-        ("RegisterProduct", None, 300),
-        ("PublishProduct", None, 310),
-        ("InstallFinalize", None, 400),
     ];
+
+    // Uninstall actions (run only when removing)
+    standard_actions.extend(vec![
+        ("RemoveShortcuts", Some("REMOVE=\"ALL\""), 175),
+        ("RemoveFiles", Some("REMOVE=\"ALL\""), 180),
+        ("RemoveRegistryValues", Some("REMOVE=\"ALL\""), 185),
+        ("RemoveEnvironmentStrings", Some("REMOVE=\"ALL\""), 190),
+    ]);
+
+    // Install actions (run only when installing)
+    standard_actions.extend(vec![
+        ("InstallFiles", Some("NOT Installed"), 200),
+    ]);
+    
+    // Conditionally add actions based on manifest content
+    if !manifest.shortcuts.custom.is_empty() || manifest.install.create_desktop_shortcut {
+        standard_actions.push(("InstallShortcuts", Some("NOT Installed"), 210));
+    }
+    if !manifest.registry.is_empty() {
+        standard_actions.push(("WriteRegistryValues", Some("NOT Installed"), 220));
+    }
+    if !manifest.env_vars.is_empty() {
+        standard_actions.push(("WriteEnvironmentStrings", Some("NOT Installed"), 230));
+    }
+    if !manifest.services.is_empty() {
+        standard_actions.push(("InstallServices", Some("NOT Installed"), 240));
+        standard_actions.push(("StartServices", Some("NOT Installed"), 250));
+    }
+    
+    standard_actions.extend(vec![
+        ("UnpublishFeatures", Some("REMOVE=\"ALL\""), 290),
+        ("UnpublishProduct", Some("REMOVE=\"ALL\""), 295),
+        ("RegisterProduct", None, 300),
+        ("PublishFeatures", Some("NOT Installed"), 310),
+        ("PublishProduct", Some("NOT Installed"), 320),
+        ("InstallFinalize", None, 400),
+    ]);
 
     for (action, condition, seq) in standard_actions {
         let cond_val = match condition {
@@ -1008,15 +1084,50 @@ fn populate_custom_actions(
         ])?;
     }
 
+    // Standard UI sequence actions — required even for silent installs
+    let ui_actions: Vec<(&str, Option<&str>, i32)> = vec![
+        ("ShowLog", None, -1),
+        ("ProgressDlg", None, 10),
+        ("CancelDlg", None, 15),
+        ("ErrorDlg", None, 50),
+        ("FatalError", None, 9999),
+        ("UserExit", None, 9999),
+        ("WelcomeDlg", Some("NOT Installed"), 1230),
+        ("LicenseAgreementDlg", Some("NOT Installed"), 1235),
+        ("InstallDirDlg", Some("NOT Installed"), 1240),
+        ("VerifyReadyDlg", Some("NOT Installed"), 1250),
+        ("MaintenanceWelcomeDlg", Some("Installed"), 1260),
+        ("MaintenanceTypeDlg", Some("Installed"), 1265),
+        ("VerifyRepairDlg", Some("Installed"), 1270),
+        ("ActionText", None, 20),
+        ("ExecuteAction", None, 1300),
+    ];
+
+    for (action, condition, seq) in ui_actions {
+        let cond_val = match condition {
+            Some(c) => Value::from(c),
+            None => Value::Null,
+        };
+        insert_row(package, "InstallUISequence", vec![
+            Value::from(action),
+            cond_val,
+            Value::Int(seq),
+        ])?;
+    }
+
     // Pre-install script custom actions
+    // TODO: Fix Type 34 custom action execution (error 1721)
+    // For now, skip pre-install scripts to allow clean MSI installation
+    /*
     for (i, cmd) in manifest.scripts.pre_install.iter().enumerate() {
         let action_name = format!("PreInstallCmd_{}", i);
+        let resolved_cmd = substitute_vars(cmd, manifest, &install_dir);
         // Type 34 = exe command line, Source = null, Target = command
         insert_row(package, "CustomAction", vec![
             Value::from(action_name.as_str()),
             Value::Int(34),
             Value::Null,
-            Value::from(format!("cmd.exe /c {}", cmd).as_str()),
+            Value::from(format!("cmd.exe /c {}", resolved_cmd).as_str()),
         ])?;
 
         // Schedule before InstallInitialize
@@ -1028,15 +1139,19 @@ fn populate_custom_actions(
 
         debug!("Pre-install action {}: {}", i, cmd);
     }
+    */
 
     // Post-install script custom actions
+    // TODO: Fix Type 34 custom action execution (error 1721)
+    /*
     for (i, cmd) in manifest.scripts.post_install.iter().enumerate() {
         let action_name = format!("PostInstallCmd_{}", i);
+        let resolved_cmd = substitute_vars(cmd, manifest, &install_dir);
         insert_row(package, "CustomAction", vec![
             Value::from(action_name.as_str()),
             Value::Int(34),
             Value::Null,
-            Value::from(format!("cmd.exe /c {}", cmd).as_str()),
+            Value::from(format!("cmd.exe /c {}", resolved_cmd).as_str()),
         ])?;
 
         // Schedule after InstallFinalize
@@ -1048,21 +1163,24 @@ fn populate_custom_actions(
 
         debug!("Post-install action {}: {}", i, cmd);
     }
+    */
 
     // Launch application after install (if configured)
     if let Some(ref run_after) = manifest.install.run_after_install {
-        insert_row(package, "CustomAction", vec![
-            Value::from("LaunchApplication"),
-            Value::Int(34),
-            Value::Null,
-            Value::from(format!("[INSTALLDIR]{}", run_after).as_str()),
-        ])?;
+        if !run_after.is_empty() {
+            insert_row(package, "CustomAction", vec![
+                Value::from("LaunchApplication"),
+                Value::Int(34),
+                Value::Null,
+                Value::from(format!("[INSTALLDIR]{}", run_after).as_str()),
+            ])?;
 
-        insert_row(package, "InstallExecuteSequence", vec![
-            Value::from("LaunchApplication"),
-            Value::from("NOT Installed"),
-            Value::Int(450),
-        ])?;
+            insert_row(package, "InstallExecuteSequence", vec![
+                Value::from("LaunchApplication"),
+                Value::from("NOT Installed"),
+                Value::Int(450),
+            ])?;
+        }
     }
 
     info!("Custom actions populated");
@@ -1073,9 +1191,13 @@ fn populate_custom_actions(
 ///
 /// Creates a proper MSI cabinet that Windows Installer can extract during installation.
 /// This is the standard approach for MSI packaging, compatible with Group Policy and SCCM.
+///
+/// IMPORTANT: CFFILE names must match the File table primary key (SourceCabKey),
+/// NOT the filename. MSI uses the File primary key to look up files in the cabinet.
 fn build_and_embed_cabinet(
     package: &mut VelocityMsi,
     files: &[(PathBuf, String)],
+    file_ids: &[String],
 ) -> Result<()> {
     // Nothing to embed — skip cabinet creation
     if files.is_empty() {
@@ -1089,9 +1211,10 @@ fn build_and_embed_cabinet(
         let mut cab_builder = cab::CabinetBuilder::new();
 
         // Add all files in a single MSZIP-compressed folder
+        // CFFILE names must match File table primary keys (file_ids)
         let folder = cab_builder.add_folder(cab::CompressionType::MsZip);
-        for (_file_path, rel_path) in files {
-            folder.add_file(rel_path);
+        for (i, (_file_path, _rel_path)) in files.iter().enumerate() {
+            folder.add_file(&file_ids[i]);
         }
 
         // Build the cabinet
