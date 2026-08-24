@@ -529,7 +529,6 @@ pub fn execute_with_config(
         if pid == 0 {
             // Process may have already completed
             info!("Elevated installer appears to have completed quickly");
-            // Run post-install commands
             for post_cmd in &config.post_install {
                 run_post_install_cmd(post_cmd);
             }
@@ -548,19 +547,37 @@ pub fn execute_with_config(
         loop {
             if !is_process_running(pid) {
                 info!("Elevated installer (PID {}) has completed", pid);
-                // Run post-install commands
+
+                // Try to retrieve exit code via wmic
+                let exit_code = get_process_exit_code(pid).unwrap_or(0);
+
+                // Check success codes
+                let is_success = if let Some(ref codes) = config.success_codes {
+                    codes.contains(&exit_code)
+                } else {
+                    is_acceptable_exit_code(exit_code)
+                };
+
+                // Run post-install commands regardless of success
                 for post_cmd in &config.post_install {
                     run_post_install_cmd(post_cmd);
                 }
+
+                if !is_success {
+                    anyhow::bail!(
+                        "Elevated installer failed with exit code {} (PID: {})",
+                        exit_code, pid
+                    );
+                }
+
                 return Ok(InstallerResult {
                     installer_type: InstallerType::Unknown,
-                    exit_code: 0, // Can't get exit code from elevated process
+                    exit_code,
                     success: true,
                 });
             }
 
             if start.elapsed() > timeout_dur {
-                // Try to kill the elevated process
                 let _ = std::process::Command::new("taskkill")
                     .args(["/PID", &pid.to_string(), "/F"])
                     .output();
@@ -781,6 +798,35 @@ fn is_process_running(pid: u32) -> bool {
     } else {
         false
     }
+}
+
+/// Try to retrieve the exit code of a completed process by PID.
+///
+/// Uses `wmic process` to query the ExitCode. Returns None if the
+/// process has already been reaped or the query fails.
+#[cfg(target_os = "windows")]
+fn get_process_exit_code(pid: u32) -> Option<i32> {
+    let output = std::process::Command::new("wmic")
+        .args([
+            "process",
+            "where",
+            &format!("ProcessId={}", pid),
+            "get",
+            "ExitCode",
+            "/Value",
+        ])
+        .output()
+        .ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Parse "ExitCode=<code>" from wmic output
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(code_str) = line.strip_prefix("ExitCode=") {
+            return code_str.trim().parse::<i32>().ok();
+        }
+    }
+    None
 }
 
 /// Run a post-install command, logging any failures.

@@ -149,7 +149,11 @@ pub fn run_fetch_install(
 
     download_result?;
 
-    // Step 5: Report completion
+    // Step 5: Write installed version atomically
+    write_installed_version(install_dir, &version_info.version)
+        .context("Failed to write installed version file")?;
+
+    // Step 6: Report completion
     report_progress(&progress_cb, "complete", 0, 0, "Installation complete!");
     
     info!(
@@ -278,6 +282,17 @@ fn download_all_files(
             );
         } else {
             warn!("Optional file not found: {}", download_pattern.pattern);
+        }
+    }
+
+    // Clean up the temp directory if it's empty (all installers were executed)
+    let temp_dir = install_dir.join(".velocity_temp");
+    if temp_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+            if entries.count() == 0 {
+                let _ = std::fs::remove_dir(&temp_dir);
+                debug!("Removed empty temp directory: {}", temp_dir.display());
+            }
         }
     }
 
@@ -518,5 +533,77 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         assert!(temp_dir.exists());
         assert!(temp_dir.is_dir());
+    }
+
+    #[test]
+    fn test_version_written_after_install() {
+        // Simulate the version-writing step that happens after download_all_files
+        let dir = tempfile::tempdir().unwrap();
+        
+        // No version file initially
+        assert!(read_installed_version(dir.path()).is_none());
+        
+        // Write version (as the pipeline does after successful install)
+        write_installed_version(dir.path(), "2.5.1").unwrap();
+        
+        // Version should be readable
+        let version = read_installed_version(dir.path()).unwrap();
+        assert_eq!(version, "2.5.1");
+        
+        // Overwrite with new version (simulating an update)
+        write_installed_version(dir.path(), "3.0.0").unwrap();
+        let version = read_installed_version(dir.path()).unwrap();
+        assert_eq!(version, "3.0.0");
+    }
+
+    #[test]
+    fn test_temp_dir_cleanup_when_empty() {
+        // Simulate the temp directory cleanup logic
+        let dir = tempfile::tempdir().unwrap();
+        let temp_dir = dir.path().join(".velocity_temp");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        
+        // Create a fake installer file in temp
+        let installer = temp_dir.join("setup.exe");
+        std::fs::write(&installer, b"MZ_FAKE").unwrap();
+        
+        // Remove the installer (simulating post-execute cleanup)
+        std::fs::remove_file(&installer).unwrap();
+        
+        // Now clean up empty temp dir (same logic as download_all_files)
+        if temp_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+                if entries.count() == 0 {
+                    std::fs::remove_dir(&temp_dir).unwrap();
+                }
+            }
+        }
+        
+        // Temp dir should be gone
+        assert!(!temp_dir.exists(), "Empty temp dir should be cleaned up");
+    }
+
+    #[test]
+    fn test_temp_dir_not_cleaned_if_files_remain() {
+        // If temp dir still has files, it should NOT be removed
+        let dir = tempfile::tempdir().unwrap();
+        let temp_dir = dir.path().join(".velocity_temp");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        
+        // Leave a file behind (simulating a failed cleanup)
+        let leftover = temp_dir.join("leftover.tmp");
+        std::fs::write(&leftover, b"data").unwrap();
+        
+        // Try cleanup
+        if temp_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+                if entries.count() == 0 {
+                    std::fs::remove_dir(&temp_dir).unwrap();
+                }
+            }
+        }
+        
+        // Temp dir should still exist because it has files
+        assert!(temp_dir.exists(), "Non-empty temp dir should NOT be cleaned up");
     }
 }
