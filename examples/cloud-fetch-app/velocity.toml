@@ -1,0 +1,69 @@
+# Example: Cloud-Fetch App
+#
+# This example demonstrates a cloud-fetch installer that downloads
+# files from GitHub releases at install time (Ninite-style).
+#
+# Build with: velocity build --mode fetch
+
+[app]
+name = "CloudFetchApp"
+version = "1.0.0"
+publisher = "Example Corp"
+description = "An app installed via cloud-fetch"
+
+[install]
+default_dir = "{autopf}/CloudFetchApp"
+start_menu = "CloudFetchApp"
+
+# ─── Cloud-Fetch Configuration ──────────────────────────────────────────
+#
+# Instead of bundling all files in the installer, download them
+# from GitHub releases at install time. This creates a tiny
+# bootstrapper installer (~1-2MB) instead of a large bundled one.
+
+[fetch]
+mode = "git-release"
+platform = "github"
+repo = "example-org/cloudfetchapp"
+asset_pattern = "CloudFetchApp-{version}-win-{arch}.zip"
+
+# Files to download from the release assets
+[fetch.files]
+download = [
+  { pattern = "*.exe", dest = "bin/", required = true },
+  { pattern = "*.dll", dest = "bin/", required = true },
+  { pattern = "README.md", dest = ".", required = false },
+  { pattern = "LICENSE", dest = ".", required = false },
+]
+
+# Auto-update configuration
+[fetch.update]
+check_interval = "24h"    # Check daily for updates
+auto_download = false      # Prompt before downloading
+auto_install = false       # Prompt before installing
+show_notification = true   # Show notification when update available
+
+# ─── Standard Configuration ─────────────────────────────────────────────
+
+[shortcuts]
+desktop = true
+start_menu = true
+
+[ui]
+theme = "modern"
+color = "#0078D4"
+
+[[pages]]
+type = "license"
+
+[[pages]]
+type = "install-dir"
+
+[[pages]]
+type = "shortcuts"
+
+[[pages]]
+type = "install"
+
+[[pages]]
+type = "complete"

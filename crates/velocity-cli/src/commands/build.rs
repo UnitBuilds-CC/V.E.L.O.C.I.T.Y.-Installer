@@ -9,15 +9,28 @@ pub fn run(
     compression: i32,
     compression_format: Option<String>,
     package_format: Option<String>,
+    mode: Option<String>,
     runtime: Option<String>,
     delta: bool,
     quiet: bool,
 ) -> Result<()> {
     let project_dir = std::env::current_dir().context("Failed to get current directory")?;
 
+    // Smart format detection: if --format is "msi" or "exe", treat it as --package-format
+    // This lets users use either `--format msi` or `--package-format msi`
+    let (compression_format, package_format) = match compression_format.as_deref() {
+        Some("msi") => (None, Some("msi".to_string())),
+        Some("exe") => (None, Some("exe".to_string())),
+        _ => (compression_format, package_format),
+    };
+
     // Determine package format (exe or msi)
     let pkg_format = package_format.unwrap_or_else(|| "exe".to_string());
     let is_msi = pkg_format.to_lowercase() == "msi";
+
+    // Determine installer mode (bundled, fetch, or hybrid)
+    let install_mode = mode.unwrap_or_else(|| "bundled".to_string());
+    let _is_fetch_mode = install_mode == "fetch" || install_mode == "hybrid";
 
     let default_output = if is_msi {
         "output/installer.msi"
@@ -59,6 +72,7 @@ pub fn run(
             println!("  Building Velocity installer...");
         }
         println!("  Compression: {} (level {})", format, level.clamp(0, 22));
+        println!("  Mode:        {}", install_mode);
         if delta {
             println!("  Delta updates: enabled");
         }

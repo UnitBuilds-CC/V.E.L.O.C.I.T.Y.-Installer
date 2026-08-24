@@ -51,6 +51,7 @@ pub fn auto_generate(project_dir: &Path) -> Result<VelocityManifest> {
         bundled_apps: Vec::new(),
         components: Vec::new(),
         localization: crate::LocalizationConfig::default(),
+        fetch: None,
     };
 
     debug!("Auto-generated manifest: {:?}", manifest.app.name);

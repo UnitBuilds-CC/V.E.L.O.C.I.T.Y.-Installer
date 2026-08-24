@@ -54,7 +54,8 @@ winreg = "0.52"
 # Cross-platform
 getrandom = "0.2"
 dirs = "5"
-ureq = "2"
+ureq = { version = "2", features = ["json"] }
+semver = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

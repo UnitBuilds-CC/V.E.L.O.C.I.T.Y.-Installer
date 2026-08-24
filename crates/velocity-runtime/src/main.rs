@@ -29,6 +29,9 @@ mod windows;
 #[cfg(not(target_os = "windows"))]
 mod unix;
 
+// Cloud-fetch installer for Ninite-style installations
+mod fetch_installer;
+
 /// Command-line arguments parsed at startup.
 struct RuntimeArgs {
     /// Silent/quiet mode — no UI, use defaults.

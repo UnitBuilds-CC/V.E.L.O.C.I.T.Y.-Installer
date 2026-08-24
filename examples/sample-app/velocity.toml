@@ -9,8 +9,8 @@
 # Uninstall: installer.exe --uninstall --force
 
 [app]
-name = "Sample App"
-version = "1.0.0"
+name = "UninstallTest"
+version = "2.0.0"
 publisher = "Velocity Team"
 icon = "assets/icon.ico"
 license = "LICENSE.txt"
@@ -18,8 +18,8 @@ license = "LICENSE.txt"
 [install]
 default_dir = "{autopf}/SampleApp"
 start_menu = "Sample App"
-require_admin = true
-run_after_install = "sample-app.exe"
+require_admin = false
+run_after_install = ""
 close_app_before_install = true
 verify_checksums = false
 arch = "x64"
@@ -94,13 +94,13 @@ quick_launch = false
 key = "Software\\SampleApp"
 name = "InstallPath"
 value = "{app}"
-root = "HKLM"
+root = "HKCU"
 
 [[registry]]
 key = "Software\\SampleApp"
 name = "Version"
 value = "{version}"
-root = "HKLM"
+root = "HKCU"
 
 [[registry]]
 key = "Software\\SampleApp\\Settings"
@@ -112,12 +112,12 @@ root = "HKCU"
 [[env_vars]]
 name = "SAMPLE_APP_HOME"
 value = "{app}"
-scope = "system"
+scope = "user"
 
 [[env_vars]]
 name = "SAMPLE_APP_VERSION"
 value = "{version}"
-scope = "system"
+scope = "user"
 
 # --- File Associations ---
 [[file_associations]]
@@ -207,3 +207,96 @@ update_url = "https://raw.githubusercontent.com/UnitBuilds-CC/V.E.L.O.C.I.T.Y.-I
 # --- UI ---
 [ui]
 theme = "classic"
+
+# --- Cloud-Fetch Examples (Ninite-style installers) ---
+#
+# These examples show how to use the [fetch] section to create tiny
+# bootstrapper installers that download and install apps at runtime.
+#
+# Example 1: GitHub release -> extract portable ZIP (e.g., ripgrep)
+# [fetch]
+# mode = "git-release"
+# platform = "github"
+# repo = "BurntSushi/ripgrep"
+# asset_pattern = "*-x86_64-*-windows-*.zip"
+# [fetch.files]
+# download = [{ pattern = "*.exe", dest = "bin/", action = "extract" }]
+#
+# Example 2: Direct URL -> silent install VLC (non-GitHub app)
+# [fetch]
+# mode = "url"
+# base_url = "https://download.videolan.org/pub/vlc/last"
+# version_url = "https://get.videolan.org/vlc/last/version.txt"
+# asset_pattern = "vlc-{version}-win64.exe"
+# [fetch.files]
+# download = [{ pattern = "*.exe", dest = ".", action = "execute", install_args = "/S" }]
+#
+# Example 3: GitHub release -> silent install with auto-detection
+# [fetch]
+# mode = "git-release"
+# platform = "github"
+# repo = "someuser/someapp"
+# asset_pattern = "*-win-x64.exe"
+# [fetch.files]
+# download = [{ pattern = "*.exe", dest = ".", action = "execute" }]
+# # install_args omitted -> auto-detects NSIS/InnoSetup and uses default silent flags
+#
+# Example 4: MSI installer from URL
+# [fetch]
+# mode = "url"
+# base_url = "https://releases.example.com/myapp"
+# version_url = "https://releases.example.com/myapp/version.txt"
+# asset_pattern = "myapp-{version}-x64.msi"
+# [fetch.files]
+# download = [{ pattern = "*.msi", dest = ".", action = "execute", file_type = "msi" }]
+#
+# --- Advanced: Custom Installer Configuration ---
+#
+# For complex installers (Adobe, Visual Studio, etc.), use the [installer] section
+# to fully control the silent installation process.
+#
+# Example 5: Adobe Acrobat Reader (custom silent flags + pre/post commands)
+# [fetch]
+# mode = "url"
+# base_url = "https://ardownload2.adobe.com/pub/adobe/reader/win/AcrobatDC"
+# asset_pattern = "AcroRdrDC*_en_US.exe"
+# [fetch.files]
+# download = [{ pattern = "*.exe", dest = ".", action = "execute",
+#   installer.args = "/sAll /rs /rps /l /tdi /qb",
+#   installer.success_codes = [0, 3010],
+#   installer.timeout_secs = 600,
+#   installer.elevate = true,
+#   installer.pre_install = ["taskkill /im AcroRd32.exe /f"],
+#   installer.post_install = ["reg import adobe_custom.reg"]
+# }]
+#
+# Example 6: Visual Studio Build Tools (complex setup with env vars)
+# [fetch]
+# mode = "git-release"
+# platform = "github"
+# repo = "microsoft/vs-build-tools"
+# asset_pattern = "vs_BuildTools.exe"
+# [fetch.files]
+# download = [{ pattern = "*.exe", dest = ".", action = "execute",
+#   installer.args = "--quiet --wait --norestart --installPath \"{dir}\"",
+#   installer.success_codes = [0, 3010],
+#   installer.timeout_secs = 1800,
+#   installer.elevate = true,
+#   installer.env = { SETUP_TYPE = "minimal" },
+#   installer.pre_install = ["taskkill /im devenv.exe /f"]
+# }]
+#
+# Example 7: Custom enterprise app with transforms
+# [fetch]
+# mode = "url"
+# base_url = "https://internal.example.com/apps"
+# asset_pattern = "enterprise-app-{version}-x64.msi"
+# [fetch.files]
+# download = [{ pattern = "*.msi", dest = ".", action = "execute",
+#   installer.args = "/i {file} /qn /norestart TRANSFORMS=\"{dir}\\custom.mst\"",
+#   installer.success_codes = [0, 1641, 3010],
+#   installer.timeout_secs = 300,
+#   installer.elevate = true,
+#   installer.post_install = ["net start EnterpriseService"]
+# }]
+

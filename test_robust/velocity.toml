@@ -1,0 +1,56 @@
+[app]
+name = "RobustnessTest"
+version = "1.0.0"
+publisher = "Velocity Team"
+
+[install]
+default_dir = "{autopf}/RobustnessTest"
+start_menu = "Robustness Test"
+require_admin = false
+arch = "x64"
+
+[files]
+source = ["large_files/*", "special/*", "empty/**/*"]
+exclude = []
+
+[files.compression]
+format = "zstd"
+level = 3
+
+[[components]]
+id = "large"
+name = "Large Files"
+description = "100MB+ of binary data"
+selected_by_default = true
+source = ["large_files/*"]
+
+[[components]]
+id = "special"
+name = "Special Characters"
+description = "Files with special characters in names"
+selected_by_default = true
+source = ["special/*"]
+
+[[components]]
+id = "empty"
+name = "Empty Files"
+description = "Empty files and nested directories"
+selected_by_default = true
+source = ["empty/**/*"]
+
+[shortcuts]
+desktop = false
+start_menu = true
+
+[[registry]]
+key = "Software\\RobustnessTest"
+name = "Version"
+value = "{version}"
+root = "HKCU"
+
+[uninstall]
+add_remove = true
+display_name = "Remove Robustness Test"
+
+[ui]
+theme = "classic"

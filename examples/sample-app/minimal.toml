@@ -1,0 +1,18 @@
+[app]
+name = "Minimal Test"
+version = "1.0.0"
+publisher = "Test"
+
+[install]
+default_dir = "{autopf}/MinimalTest"
+arch = "x64"
+
+[files]
+source = ["files/bin/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[ui]
+theme = "classic"

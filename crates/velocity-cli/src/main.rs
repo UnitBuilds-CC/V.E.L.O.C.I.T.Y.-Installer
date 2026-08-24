@@ -51,6 +51,10 @@ enum Commands {
         #[arg(long, default_value = "exe")]
         package_format: Option<String>,
 
+        /// Installer mode: bundled (default), fetch, or hybrid
+        #[arg(long, default_value = "bundled")]
+        mode: Option<String>,
+
         /// Path to the runtime binary
         #[arg(long)]
         runtime: Option<String>,
@@ -163,6 +167,7 @@ fn main() -> Result<()> {
             compression,
             format,
             package_format,
+            mode,
             runtime,
             delta,
             quiet,
@@ -172,6 +177,7 @@ fn main() -> Result<()> {
                 compression,
                 format,
                 package_format,
+                mode,
                 runtime,
                 delta,
                 quiet,

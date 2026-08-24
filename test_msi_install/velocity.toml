@@ -1,0 +1,14 @@
+[app]
+name = "VelocityTestApp"
+version = "1.0.0"
+publisher = "Velocity Team"
+
+[install]
+default_dir = "{localappdata}/VelocityTestApp"
+start_menu = "Velocity Test App"
+require_admin = false
+arch = "x64"
+per_user = true
+
+[files]
+source = ["files/**/*"]

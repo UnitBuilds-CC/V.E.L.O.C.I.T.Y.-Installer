@@ -1,0 +1,13 @@
+[app]
+name = "Minimal Test"
+version = "1.0.0"
+publisher = "Test"
+id = "minimal-test"
+
+[install]
+arch = "x64"
+require_admin = false
+
+[files]
+source = ["files/*"]
+compression = { format = "zstd", level = 3 }

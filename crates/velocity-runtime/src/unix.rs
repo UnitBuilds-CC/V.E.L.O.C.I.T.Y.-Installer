@@ -48,6 +48,53 @@ pub fn run() -> Result<()> {
         manifest.app.name, manifest.app.version
     );
 
+    // ─── Cloud-Fetch Mode Detection ─────────────────────────────────────
+    if let Some(ref fetch_config) = manifest.fetch {
+        info!("Cloud-fetch mode detected, delegating to fetch installer...");
+        
+        let install_dir = if let Some(ref dir) = args.dir {
+            PathBuf::from(dir)
+        } else {
+            velocity_core::platform::default_install_dir(&manifest.app.name)
+        };
+
+        let current_version = fetch_installer::read_installed_version(&install_dir);
+        
+        match fetch_installer::run_fetch_install(
+            fetch_config,
+            &install_dir,
+            current_version.as_deref(),
+            args.silent,
+            None,
+        ) {
+            Ok(result) => {
+                let _ = fetch_installer::write_installed_version(&install_dir, &result.version);
+                info!("Cloud-fetch install complete: v{}", result.version);
+                
+                if !args.silent {
+                    println!("Installation complete: {} v{}", manifest.app.name, result.version);
+                    println!("Installed to: {}", install_dir.display());
+                }
+                
+                if let Some(ref run_exe) = manifest.install.run_after_install {
+                    let exe_path = install_dir.join(run_exe);
+                    if exe_path.exists() {
+                        let _ = std::process::Command::new(&exe_path)
+                            .current_dir(&install_dir)
+                            .spawn();
+                    }
+                }
+                
+                return Ok(());
+            }
+            Err(e) => {
+                error!("Cloud-fetch install failed: {}", e);
+                eprintln!("Installation failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Show wizard or use defaults
     let wizard_result = if args.silent {
         info!("Silent mode — using defaults");

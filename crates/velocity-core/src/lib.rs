@@ -19,6 +19,7 @@ pub mod encryption;
 pub mod env_vars;
 pub mod error;
 pub mod extract;
+pub mod fetch;
 pub mod file_assoc;
 pub mod installer_mutex;
 pub mod localization;

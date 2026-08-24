@@ -487,4 +487,174 @@ version = "1.0.0"
         assert!(result.is_ok());
         assert_eq!(result.unwrap().registry.len(), 100);
     }
+
+    // ── Fetch config action tests ─────────────────────────────────────
+
+    #[test]
+    fn test_parse_fetch_action_default() {
+        // Action should default to "extract" when not specified
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "git-release"
+platform = "github"
+repo = "user/repo"
+
+[fetch.files]
+download = [{ pattern = "*.exe", dest = "bin/" }]
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        assert_eq!(manifest.fetch.as_ref().unwrap().files.download.len(), 1);
+        assert_eq!(
+            manifest.fetch.as_ref().unwrap().files.download[0].action,
+            crate::FetchAction::Extract
+        );
+    }
+
+    #[test]
+    fn test_parse_fetch_action_execute() {
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "url"
+base_url = "https://example.com/dl"
+version_url = "https://example.com/version.txt"
+asset_pattern = "app-{version}.exe"
+
+[fetch.files]
+download = [{ pattern = "*.exe", dest = ".", action = "execute", install_args = "/S" }]
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        let fetch = manifest.fetch.as_ref().unwrap();
+        assert_eq!(fetch.files.download[0].action, crate::FetchAction::Execute);
+        assert_eq!(fetch.files.download[0].install_args.as_deref(), Some("/S"));
+    }
+
+    #[test]
+    fn test_parse_fetch_action_copy() {
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "git-release"
+platform = "github"
+repo = "user/repo"
+
+[fetch.files]
+download = [{ pattern = "*.dll", dest = "lib/", action = "copy" }]
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        assert_eq!(
+            manifest.fetch.as_ref().unwrap().files.download[0].action,
+            crate::FetchAction::Copy
+        );
+    }
+
+    #[test]
+    fn test_parse_fetch_file_type_hint() {
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "url"
+base_url = "https://example.com"
+version_url = "https://example.com/version.txt"
+
+[fetch.files]
+download = [{ pattern = "*.msi", dest = ".", action = "execute", file_type = "msi" }]
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        let dl = &manifest.fetch.as_ref().unwrap().files.download[0];
+        assert_eq!(dl.file_type.as_deref(), Some("msi"));
+    }
+
+    #[test]
+    fn test_parse_custom_installer_config() {
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "url"
+base_url = "https://example.com"
+version_url = "https://example.com/version.txt"
+
+[[fetch.files.download]]
+pattern = "*.exe"
+dest = "."
+action = "execute"
+
+[fetch.files.download.installer]
+args = "/sAll /rs /rps /l /tdi /qb"
+success_codes = [0, 3010]
+timeout_secs = 600
+elevate = true
+pre_install = ["taskkill /im AcroRd32.exe /f"]
+post_install = ["reg import custom.reg"]
+working_dir = "C:\\Temp"
+
+[fetch.files.download.installer.env]
+TRANSFORMS = "custom.mst"
+SETUP_TYPE = "minimal"
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        let dl = &manifest.fetch.as_ref().unwrap().files.download[0];
+        let config = dl.installer.as_ref().expect("installer config should be present");
+
+        assert_eq!(config.args.as_deref(), Some("/sAll /rs /rps /l /tdi /qb"));
+        assert_eq!(config.success_codes.as_ref().unwrap(), &vec![0, 3010]);
+        assert_eq!(config.timeout_secs, Some(600));
+        assert_eq!(config.elevate, Some(true));
+        assert_eq!(config.pre_install, vec!["taskkill /im AcroRd32.exe /f"]);
+        assert_eq!(config.post_install, vec!["reg import custom.reg"]);
+        assert_eq!(config.working_dir.as_deref(), Some("C:\\Temp"));
+        assert_eq!(config.env.get("TRANSFORMS").unwrap(), "custom.mst");
+        assert_eq!(config.env.get("SETUP_TYPE").unwrap(), "minimal");
+    }
+
+    #[test]
+    fn test_parse_custom_installer_minimal() {
+        // Test that installer config works with only some fields set
+        let toml = r#"
+[app]
+name = "Test"
+version = "1.0"
+
+[fetch]
+mode = "url"
+base_url = "https://example.com"
+version_url = "https://example.com/version.txt"
+
+[[fetch.files.download]]
+pattern = "*.exe"
+dest = "."
+action = "execute"
+
+[fetch.files.download.installer]
+args = "--quiet --norestart"
+timeout_secs = 1800
+"#;
+        let manifest = parse_manifest_str(toml).unwrap();
+        let dl = &manifest.fetch.as_ref().unwrap().files.download[0];
+        let config = dl.installer.as_ref().expect("installer config should be present");
+
+        assert_eq!(config.args.as_deref(), Some("--quiet --norestart"));
+        assert_eq!(config.timeout_secs, Some(1800));
+        assert!(config.success_codes.is_none());
+        assert!(config.elevate.is_none());
+        assert!(config.pre_install.is_empty());
+        assert!(config.post_install.is_empty());
+        assert!(config.env.is_empty());
+    }
 }

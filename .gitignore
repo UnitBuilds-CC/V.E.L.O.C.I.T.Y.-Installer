@@ -2,6 +2,13 @@
 /target/
 **/*.rs.bk
 
+# Test artifacts
+test_silent_install/*_log.txt
+test_*/output/
+*.msi
+!crates/velocity-msi/test_full.msi
+!msi_test/*.msi
+
 # IDE
 .vscode/
 .idea/

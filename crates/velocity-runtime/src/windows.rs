@@ -64,6 +64,87 @@ pub(super) fn run() -> Result<()> {
         manifest.app.name, manifest.app.version
     );
 
+    // ─── Cloud-Fetch Mode Detection ─────────────────────────────────────
+    // If the manifest has a [fetch] section, run the cloud-fetch installer
+    // flow instead of the normal bundled extraction flow.
+    if let Some(ref fetch_config) = manifest.fetch {
+        info!("Cloud-fetch mode detected, delegating to fetch installer...");
+        
+        // Determine install directory
+        let install_dir = if let Some(ref dir) = args.dir {
+            std::path::PathBuf::from(dir)
+        } else {
+            let default_path = velocity_config::VariableResolver::new(&std::path::PathBuf::from(
+                format!("C:\\Program Files\\{}", manifest.app.name),
+            ))
+            .resolve(&manifest.install.default_dir);
+            
+            let mut resolved = default_path;
+            if resolved.contains("{autopf}") {
+                let install_64bit = velocity_core::arch_detect::default_install_mode(&manifest.install.arch);
+                let pf = velocity_core::arch_detect::program_files_dir(install_64bit);
+                resolved = resolved.replace("{autopf}", &pf.to_string_lossy());
+            }
+            std::path::PathBuf::from(resolved)
+        };
+
+        // Read currently installed version (if any)
+        let current_version = fetch_installer::read_installed_version(&install_dir);
+        
+        match fetch_installer::run_fetch_install(
+            fetch_config,
+            &install_dir,
+            current_version.as_deref(),
+            args.silent,
+            None,
+        ) {
+            Ok(result) => {
+                // Write the installed version
+                let _ = fetch_installer::write_installed_version(&install_dir, &result.version);
+                
+                info!(
+                    "Cloud-fetch install complete: v{} ({} files, {} bytes)",
+                    result.version, result.files_downloaded, result.bytes_downloaded
+                );
+                
+                if !args.silent {
+                    velocity_ui::classic::show_message(
+                        "Installation Complete",
+                        &format!(
+                            "{} v{} has been installed successfully.\n\nInstalled to: {}",
+                            manifest.app.name, result.version, install_dir.display()
+                        ),
+                    );
+                }
+                
+                // Launch app if configured
+                if let Some(ref run_exe) = manifest.install.run_after_install {
+                    let exe_path = install_dir.join(run_exe);
+                    if exe_path.exists() {
+                        let _ = std::process::Command::new(&exe_path)
+                            .current_dir(&install_dir)
+                            .spawn();
+                    }
+                }
+                
+                return Ok(());
+            }
+            Err(e) => {
+                error!("Cloud-fetch install failed: {}", e);
+                if !args.silent {
+                    velocity_ui::classic::show_error(
+                        "Installation Failed",
+                        &format!(
+                            "Failed to download and install {}.\n\nError: {}\n\nPlease check your internet connection and try again.",
+                            manifest.app.name, e
+                        ),
+                    );
+                }
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Track install duration for telemetry
     let install_start = std::time::Instant::now();
     let app_name_telem = manifest.app.name.clone();

@@ -1,0 +1,34 @@
+[app]
+name = "OneMBTest"
+version = "1.0.0"
+publisher = "Velocity Team"
+
+[install]
+default_dir = "{autopf}/OneMBTest"
+require_admin = false
+arch = "x64"
+
+[files]
+source = ["files/*"]
+exclude = []
+
+[files.compression]
+format = "zstd"
+level = 3
+
+[[components]]
+id = "main"
+name = "Main Files"
+description = "Application files"
+selected_by_default = true
+source = ["files/*"]
+
+[shortcuts]
+desktop = false
+start_menu = false
+
+[uninstall]
+add_remove = true
+
+[ui]
+theme = "classic"

@@ -52,6 +52,9 @@ pub struct VelocityManifest {
     /// Localization / internationalization settings
     #[serde(default)]
     pub localization: LocalizationConfig,
+    /// Cloud-fetch configuration for Ninite-style installers
+    #[serde(default)]
+    pub fetch: Option<FetchConfig>,
 }
 
 /// Application metadata.
@@ -696,6 +699,321 @@ pub struct LanguageEntry {
     /// Localized UI strings for this language
     #[serde(default)]
     pub strings: HashMap<String, String>,
+}
+
+// ─── Cloud-Fetch Configuration ─────────────────────────────────────────────
+
+/// Cloud-fetch configuration for Ninite-style installers.
+///
+/// Enables downloading files at install time from Git release tags or HTTP URLs,
+/// creating tiny bootstrapper installers that fetch content on-demand.
+///
+/// # Example (Git Release Mode)
+/// ```toml
+/// [fetch]
+/// mode = "git-release"
+/// platform = "github"
+/// repo = "user/myapp"
+/// asset_pattern = "{app}-{version}-win-{arch}.zip"
+///
+/// [fetch.files]
+/// download = [
+///   { pattern = "*.exe", dest = "bin/" },
+///   { pattern = "*.dll", dest = "bin/" }
+/// ]
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchConfig {
+    /// Fetch mode: "git-release", "url", or "hybrid"
+    pub mode: FetchMode,
+    /// Git platform: "github", "gitlab", "bitbucket", or "gitea"
+    #[serde(default)]
+    pub platform: Option<GitPlatform>,
+    /// Repository in "owner/repo" format (for git-release mode)
+    #[serde(default)]
+    pub repo: Option<String>,
+    /// Asset filename pattern with placeholders: {app}, {version}, {arch}
+    #[serde(default)]
+    pub asset_pattern: Option<String>,
+    /// Custom API URL for self-hosted Git instances
+    #[serde(default)]
+    pub api_url: Option<String>,
+    /// Base URL for direct HTTP downloads (for url mode)
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// URL to version.txt file for version checking (for url mode)
+    #[serde(default)]
+    pub version_url: Option<String>,
+    /// URL template for checksum file (for url mode)
+    #[serde(default)]
+    pub checksum_url: Option<String>,
+    /// File download patterns and destinations
+    #[serde(default)]
+    pub files: FetchFileConfig,
+    /// Auto-update configuration
+    #[serde(default)]
+    pub update: Option<UpdateConfig>,
+    /// Files to bundle in hybrid mode
+    #[serde(default)]
+    pub bundle: Option<FetchBundleConfig>,
+    /// Authentication token for private repositories (optional)
+    #[serde(default)]
+    pub auth_token: Option<String>,
+}
+
+impl Default for FetchConfig {
+    fn default() -> Self {
+        Self {
+            mode: FetchMode::GitRelease,
+            platform: None,
+            repo: None,
+            asset_pattern: None,
+            api_url: None,
+            base_url: None,
+            version_url: None,
+            checksum_url: None,
+            files: FetchFileConfig::default(),
+            update: None,
+            bundle: None,
+            auth_token: None,
+        }
+    }
+}
+
+/// Fetch mode determining how files are sourced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FetchMode {
+    /// Download from Git release assets (GitHub, GitLab, etc.)
+    GitRelease,
+    /// Download from direct HTTP URLs
+    Url,
+    /// Bundle critical files + fetch optional files
+    Hybrid,
+}
+
+/// Supported Git hosting platforms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GitPlatform {
+    /// GitHub.com or GitHub Enterprise
+    GitHub,
+    /// GitLab.com or self-hosted GitLab
+    GitLab,
+    /// Bitbucket.org or Bitbucket Server
+    Bitbucket,
+    /// Gitea or Forgejo instances
+    Gitea,
+}
+
+/// File download patterns for cloud-fetch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FetchFileConfig {
+    /// List of download patterns with destinations
+    #[serde(default)]
+    pub download: Vec<FetchDownloadPattern>,
+}
+
+/// Action to perform after downloading a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FetchAction {
+    /// Extract archive (ZIP/TAR) or copy to destination (default).
+    Extract,
+    /// Execute the downloaded file as a silent installer.
+    Execute,
+    /// Copy the file to the destination directory without extraction.
+    Copy,
+}
+
+impl Default for FetchAction {
+    fn default() -> Self {
+        Self::Extract
+    }
+}
+
+/// A pattern matching release assets to download.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchDownloadPattern {
+    /// Glob pattern to match asset filenames (e.g., "*.exe", "app-*.zip")
+    pub pattern: String,
+    /// Destination directory relative to install dir (e.g., "bin/", ".")
+    pub dest: String,
+    /// Whether this download is required (fails install if missing)
+    #[serde(default = "default_true")]
+    pub required: bool,
+    /// Expected SHA256 checksum for verification (optional)
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// Action to perform after download: "extract" (default), "execute", or "copy"
+    #[serde(default)]
+    pub action: FetchAction,
+    /// Command-line arguments for silent execution (when action = "execute").
+    /// If omitted, the installer type is auto-detected and default flags are used.
+    #[serde(default)]
+    pub install_args: Option<String>,
+    /// File type hint: "exe", "msi" (when action = "execute").
+    /// If omitted, detected from file extension or binary signature.
+    #[serde(default)]
+    pub file_type: Option<String>,
+    /// Advanced installer configuration for complex setups.
+    /// Allows custom exit codes, pre/post commands, environment variables, etc.
+    #[serde(default)]
+    pub installer: Option<InstallerConfig>,
+}
+
+/// User-configurable installer options for complex or custom installers.
+///
+/// This allows silent installation of ANY installer, including complex setups
+/// like Adobe Acrobat, Visual Studio, or custom enterprise packages.
+///
+/// Example TOML configuration:
+/// ```toml
+/// [[fetch.download]]
+/// pattern = "AcrobatReader*.exe"
+/// dest = "."
+/// action = "execute"
+///
+/// [fetch.download.installer]
+/// args = "/sAll /rs /rps /l /tdi /qb"
+/// success_codes = [0, 3010, 1641]
+/// timeout_secs = 600
+/// elevate = true
+/// pre_install = ["taskkill /im AcroRd32.exe /f"]
+/// post_install = ["reg import custom_settings.reg"]
+///
+/// [fetch.download.installer.env]
+/// TRANSFORMS = "custom.mst"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InstallerConfig {
+    /// Custom command-line arguments for the installer.
+    /// Overrides auto-detected silent flags.
+    /// Supports placeholders: {dir} for install directory, {file} for installer path.
+    ///
+    /// Examples:
+    /// - NSIS: "/S /D={dir}"
+    /// - InnoSetup: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=\"{dir}\""
+    /// - Adobe: "/sAll /rs /rps /l /tdi /qb"
+    /// - Visual Studio: "--quiet --wait --norestart --installPath \"{dir}\""
+    #[serde(default)]
+    pub args: Option<String>,
+
+    /// Exit codes that indicate successful installation.
+    /// Default: [0, 3010, 1641, 1605, 1638, 1]
+    ///
+    /// Common codes:
+    /// - 0: Success
+    /// - 1: Success (some NSIS installers)
+    /// - 1641: MSI reboot initiated
+    /// - 3010: MSI reboot required
+    /// - 1605: MSI product not installed (uninstall)
+    /// - 1638: MSI product already installed
+    #[serde(default)]
+    pub success_codes: Option<Vec<i32>>,
+
+    /// Maximum time to wait for the installer to complete (seconds).
+    /// Default: 300 (5 minutes). Complex installers may need 600-1800.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+
+    /// Whether this installer requires administrator privileges.
+    /// If true, the installer will be launched with elevation.
+    /// If false, runs as the current user.
+    /// Default: auto-detected (most .exe installers need admin).
+    #[serde(default)]
+    pub elevate: Option<bool>,
+
+    /// Commands to run BEFORE the installer.
+    /// Useful for stopping services, killing processes, or preparing the system.
+    /// Each command is a string executed via the system shell.
+    ///
+    /// Examples:
+    /// - ["taskkill /im notepad++.exe /f"]
+    /// - ["net stop wuauserv", "sc config wuauserv start=auto"]
+    #[serde(default)]
+    pub pre_install: Vec<String>,
+
+    /// Commands to run AFTER successful installation.
+    /// Useful for importing registry settings, starting services, or cleanup.
+    /// Each command is a string executed via the system shell.
+    ///
+    /// Examples:
+    /// - ["reg import custom_settings.reg"]
+    /// - ["net start MyAppService"]
+    #[serde(default)]
+    pub post_install: Vec<String>,
+
+    /// Environment variables to set when running the installer.
+    /// Useful for unattended installations that read config from env.
+    ///
+    /// Example:
+    /// ```toml
+    /// [fetch.download.installer.env]
+    /// TRANSFORMS = "custom.mst"
+    /// SETUP_TYPE = "minimal"
+    /// ```
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+
+    /// Working directory for the installer.
+    /// Default: directory containing the installer file.
+    /// Some installers need a specific working directory to find supporting files.
+    #[serde(default)]
+    pub working_dir: Option<String>,
+
+    /// Custom binary signature strings for installer type detection.
+    /// If the installer binary contains any of these strings, it's detected as this type.
+    /// Useful for custom installer frameworks not in the built-in list.
+    ///
+    /// Example: ["MyCustomInstaller", "AcroSetup"]
+    #[serde(default)]
+    pub detect_signatures: Vec<String>,
+
+    /// Custom installer type name for display/logging.
+    /// Used with detect_signatures to identify custom installer frameworks.
+    #[serde(default)]
+    pub detect_name: Option<String>,
+}
+
+/// Auto-update configuration for cloud-fetch installers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// How often to check for updates: "1h", "24h", "1d", "1w", "never"
+    #[serde(default = "default_update_interval")]
+    pub check_interval: String,
+    /// Whether to automatically download updates without prompting
+    #[serde(default)]
+    pub auto_download: bool,
+    /// Whether to automatically install updates without prompting
+    #[serde(default)]
+    pub auto_install: bool,
+    /// Whether to show a notification when an update is available
+    #[serde(default = "default_true")]
+    pub show_notification: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_interval: default_update_interval(),
+            auto_download: false,
+            auto_install: false,
+            show_notification: true,
+        }
+    }
+}
+
+/// Bundle configuration for hybrid mode (files to include in installer).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FetchBundleConfig {
+    /// File patterns to bundle in the installer
+    #[serde(default)]
+    pub source: Vec<String>,
+}
+
+fn default_update_interval() -> String {
+    "24h".to_string()
 }
 
 // ─── Default value functions ─────────────────────────────────────────────────
