@@ -99,8 +99,7 @@ pub(super) fn run() -> Result<()> {
             None,
         ) {
             Ok(result) => {
-                // Write the installed version
-                let _ = fetch_installer::write_installed_version(&install_dir, &result.version);
+                // Version file is written inside run_fetch_install
                 
                 info!(
                     "Cloud-fetch install complete: v{} ({} files, {} bytes)",
