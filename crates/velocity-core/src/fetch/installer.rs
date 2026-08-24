@@ -532,6 +532,12 @@ pub fn execute_with_config(
             for post_cmd in &config.post_install {
                 run_post_install_cmd(post_cmd);
             }
+            verify_installed_files(install_dir, &config.verify_files)?;
+            if config.add_to_path {
+                if let Some(dir) = install_dir {
+                    add_directory_to_path(dir)?;
+                }
+            }
             return Ok(InstallerResult {
                 installer_type: InstallerType::Unknown,
                 exit_code: 0,
@@ -568,6 +574,14 @@ pub fn execute_with_config(
                         "Elevated installer failed with exit code {} (PID: {})",
                         exit_code, pid
                     );
+                }
+
+                // Post-install verification
+                verify_installed_files(install_dir, &config.verify_files)?;
+                if config.add_to_path {
+                    if let Some(dir) = install_dir {
+                        add_directory_to_path(dir)?;
+                    }
                 }
 
                 return Ok(InstallerResult {
@@ -632,6 +646,16 @@ pub fn execute_with_config(
                 // ── Post-install commands ────────────────────────────
                 for post_cmd in &config.post_install {
                     run_post_install_cmd(post_cmd);
+                }
+
+                // ── Post-install verification ────────────────────────
+                verify_installed_files(install_dir, &config.verify_files)?;
+
+                // ── PATH management ──────────────────────────────────
+                if config.add_to_path {
+                    if let Some(dir) = install_dir {
+                        add_directory_to_path(dir)?;
+                    }
                 }
 
                 return Ok(InstallerResult {
@@ -863,6 +887,100 @@ fn collect_output<R: std::io::Read>(pipe: Option<R>) -> String {
         buf
     } else {
         String::new()
+    }
+}
+
+/// Verify that expected files exist after installation.
+///
+/// Checks each path in `verify_files` relative to `install_dir`.
+/// Returns an error listing all missing files if any are not found.
+#[cfg(target_os = "windows")]
+fn verify_installed_files(install_dir: Option<&Path>, verify_files: &[String]) -> Result<()> {
+    if verify_files.is_empty() {
+        return Ok(());
+    }
+    let base = install_dir.unwrap_or_else(|| std::path::Path::new("."));
+    let mut missing = Vec::new();
+    for relative_path in verify_files {
+        let full_path = base.join(relative_path);
+        if !full_path.exists() {
+            missing.push(relative_path.clone());
+        }
+    }
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Post-install verification failed — missing files: {}",
+            missing.join(", ")
+        );
+    }
+    info!("Post-install verification passed ({} files checked)", verify_files.len());
+    Ok(())
+}
+
+/// Add a directory to the user's PATH environment variable (Windows).
+///
+/// Reads the current user PATH from the registry, appends the directory
+/// if not already present, and writes it back. Also broadcasts a
+/// WM_SETTINGCHANGE so other apps pick up the change.
+#[cfg(target_os = "windows")]
+fn add_directory_to_path(dir: &Path) -> Result<()> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let dir_str = dir.to_string_lossy().to_string();
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let env_key = hkcu.open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
+        .context("Failed to open Environment registry key")?;
+
+    let current_path: String = env_key.get_value("Path").unwrap_or_default();
+    let dirs: Vec<&str> = current_path.split(';').collect();
+
+    // Check if already in PATH (case-insensitive on Windows)
+    let dir_lower = dir_str.to_lowercase();
+    if dirs.iter().any(|d| d.trim_end_matches('\\').to_lowercase() == dir_lower) {
+        debug!("Directory already in PATH: {}", dir_str);
+        return Ok(());
+    }
+
+    // Append to PATH
+    let new_path = if current_path.is_empty() {
+        dir_str.clone()
+    } else if current_path.ends_with(';') {
+        format!("{}{}", current_path, dir_str)
+    } else {
+        format!("{};{}", current_path, dir_str)
+    };
+
+    env_key.set_value("Path", &new_path)
+        .context("Failed to write PATH to registry")?;
+
+    // Broadcast WM_SETTINGCHANGE so other apps pick up the change
+    broadcast_setting_change();
+
+    info!("Added to user PATH: {}", dir_str);
+    Ok(())
+}
+
+/// Broadcast WM_SETTINGCHANGE to notify other applications of environment changes.
+#[cfg(target_os = "windows")]
+fn broadcast_setting_change() {
+    use windows::Win32::Foundation::*;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe {
+        let env_str: Vec<u16> = "Environment\0".encode_utf16().collect();
+        let result = SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(env_str.as_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            5000,
+            None,
+        );
+        if result.0 == 0 {
+            debug!("WM_SETTINGCHANGE broadcast timed out (non-critical)");
+        }
     }
 }
 
@@ -1435,5 +1553,59 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("empty"), "Error should mention empty file: {}", err_msg);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_verify_installed_files_all_present() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Create expected files
+        std::fs::write(tmp.path().join("app.exe"), b"binary").unwrap();
+        std::fs::create_dir_all(tmp.path().join("lib")).unwrap();
+        std::fs::write(tmp.path().join("lib/core.dll"), b"dll").unwrap();
+
+        let files = vec!["app.exe".to_string(), "lib/core.dll".to_string()];
+        let result = verify_installed_files(Some(tmp.path()), &files);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_verify_installed_files_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("app.exe"), b"binary").unwrap();
+
+        let files = vec!["app.exe".to_string(), "missing.dll".to_string()];
+        let result = verify_installed_files(Some(tmp.path()), &files);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("missing.dll"), "Error should list missing file: {}", err);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_verify_installed_files_empty_list() {
+        let result = verify_installed_files(None, &[]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_installer_config_deserialize_verify_files() {
+        let toml = r#"
+            args = "/S"
+            verify_files = ["bin/app.exe", "lib/core.dll"]
+            add_to_path = true
+        "#;
+        let config: velocity_config::InstallerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.verify_files, vec!["bin/app.exe", "lib/core.dll"]);
+        assert!(config.add_to_path);
+    }
+
+    #[test]
+    fn test_installer_config_defaults_no_verify() {
+        let toml = r#"args = "/S""#;
+        let config: velocity_config::InstallerConfig = toml::from_str(toml).unwrap();
+        assert!(config.verify_files.is_empty());
+        assert!(!config.add_to_path);
     }
 }

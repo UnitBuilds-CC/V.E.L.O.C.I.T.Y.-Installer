@@ -14,6 +14,7 @@ mod url_client;
 pub mod download;
 pub mod update;
 pub mod installer;
+pub mod archive;
 
 pub use github::GitHubClient;
 pub use gitlab::GitLabClient;

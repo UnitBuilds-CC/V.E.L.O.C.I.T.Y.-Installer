@@ -974,6 +974,23 @@ pub struct InstallerConfig {
     /// Used with detect_signatures to identify custom installer frameworks.
     #[serde(default)]
     pub detect_name: Option<String>,
+
+    /// Files to verify after installation.
+    /// After the installer completes, these files are checked for existence.
+    /// If any file is missing, the installation is considered failed.
+    /// Paths are relative to the install directory.
+    ///
+    /// Examples:
+    /// - ["bin/myapp.exe", "lib/core.dll"]
+    /// - ["MyApp.exe"]
+    #[serde(default)]
+    pub verify_files: Vec<String>,
+
+    /// Whether to add the install directory to the system PATH.
+    /// Only effective on Windows. Requires elevation.
+    /// Default: false.
+    #[serde(default)]
+    pub add_to_path: bool,
 }
 
 /// Auto-update configuration for cloud-fetch installers.

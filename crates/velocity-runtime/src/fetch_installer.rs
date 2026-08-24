@@ -119,6 +119,14 @@ pub fn run_fetch_install(
     std::fs::create_dir_all(install_dir)
         .context("Failed to create install directory")?;
 
+    // Step 4b: Check disk space (need at least 100MB free, or 2x estimated size)
+    let estimated_size: u64 = version_info.assets.iter()
+        .map(|a| a.size)
+        .sum();
+    let min_free = estimated_size.saturating_mul(2).max(100 * 1024 * 1024);
+    check_disk_space(install_dir, min_free)
+        .context("Insufficient disk space")?;
+
     let mut files_downloaded = 0u32;
     let mut bytes_downloaded = 0u64;
     let mut downloaded_paths: Vec<PathBuf> = Vec::new(); // Track for cleanup on failure
@@ -264,10 +272,23 @@ fn download_all_files(
                     }
                 }
                 FetchAction::Extract => {
-                    // File is already downloaded to dest directory
-                    // For archives (ZIP/TAR), users should use action = "execute" with
-                    // a self-extracting installer, or the file is placed as-is for manual extraction
-                    debug!("Extracted (copied): {} to {}", asset.name, download_pattern.dest);
+                    // Check if it's an archive that needs extraction
+                    let is_archive = velocity_core::fetch::archive::detect_archive_format(&path).is_some();
+                    if is_archive {
+                        report_progress(progress_cb, "extracting", 0, 0,
+                            &format!("Extracting: {}", asset.name));
+                        let extract_dest = install_dir.join(&download_pattern.dest);
+                        let extracted = velocity_core::fetch::archive::extract_archive(&path, &extract_dest)
+                            .with_context(|| format!("Failed to extract archive: {}", asset.name))?;
+                        info!("Extracted {} files from {} to {}", extracted, asset.name, download_pattern.dest);
+                        // Clean up the archive file after extraction
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            debug!("Failed to remove archive after extraction {}: {}", path.display(), e);
+                        }
+                    } else {
+                        // Non-archive files are just copied to dest
+                        debug!("Copied (extract action, no archive): {} to {}", asset.name, download_pattern.dest);
+                    }
                 }
                 FetchAction::Copy => {
                     // File is already in dest, nothing to do
@@ -364,6 +385,87 @@ pub fn write_installed_version(install_dir: &Path, version: &str) -> Result<()> 
         .with_context(|| format!("Failed to rename version file to {}", version_file.display()))?;
     
     Ok(())
+}
+
+/// Check that the disk containing `path` has at least `min_bytes` free.
+///
+/// Uses `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix.
+/// Returns Ok(()) if sufficient space is available, or an error with
+/// the actual free space for diagnostic purposes.
+fn check_disk_space(path: &Path, min_bytes: u64) -> Result<()> {
+    // Ensure the path exists so we can query its volume
+    if !path.exists() {
+        debug!("Disk space check: path does not exist yet, skipping: {}", path.display());
+        return Ok(());
+    }
+
+    let free = get_free_disk_space(path)?;
+    if free < min_bytes {
+        let free_mb = free / (1024 * 1024);
+        let need_mb = min_bytes / (1024 * 1024);
+        anyhow::bail!(
+            "Insufficient disk space on {}: {}MB free, {}MB needed",
+            path.display(), free_mb, need_mb
+        );
+    }
+    debug!("Disk space check: {}MB free (need {}MB) — OK",
+        free / (1024 * 1024), min_bytes / (1024 * 1024));
+    Ok(())
+}
+
+/// Get free disk space in bytes for the volume containing `path`.
+#[cfg(target_os = "windows")]
+fn get_free_disk_space(path: &Path) -> Result<u64> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut free_bytes_available: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut total_free: u64 = 0;
+
+    let result = unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR(wide.as_ptr()),
+            Some(&mut free_bytes_available),
+            Some(&mut total_bytes),
+            Some(&mut total_free),
+        )
+    };
+
+    if result.is_ok() {
+        Ok(free_bytes_available)
+    } else {
+        // Fallback: try parent directory
+        if let Some(parent) = path.parent() {
+            if parent != path {
+                return get_free_disk_space(parent);
+            }
+        }
+        warn!("Could not query disk space for {}", path.display());
+        Ok(u64::MAX) // Assume enough if we can't check
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_free_disk_space(path: &Path) -> Result<u64> {
+    use std::mem;
+    let c_path = std::ffi::CString::new(path.to_string_lossy.as_ref())
+        .context("Invalid path for disk space check")?;
+    let mut stat: libc::statvfs = unsafe { mem::zeroed() };
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    if ret == 0 {
+        Ok(stat.f_bavail as u64 * stat.f_frsize as u64)
+    } else {
+        warn!("Could not query disk space for {}", path.display());
+        Ok(u64::MAX) // Assume enough if we can't check
+    }
 }
 
 /// Report progress to the callback if available.
@@ -605,5 +707,40 @@ mod tests {
         
         // Temp dir should still exist because it has files
         assert!(temp_dir.exists(), "Non-empty temp dir should NOT be cleaned up");
+    }
+
+    #[test]
+    fn test_check_disk_space_nonexistent_path_ok() {
+        // Non-existent path should pass (we can't check what doesn't exist)
+        let path = std::path::Path::new("Z:\\nonexistent\\path");
+        let result = check_disk_space(path, 1024 * 1024);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_disk_space_sufficient() {
+        // An existing temp dir should have at least 1 byte free
+        let dir = tempfile::tempdir().unwrap();
+        let result = check_disk_space(dir.path(), 1);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_disk_space_insufficient() {
+        // Request an absurdly large amount — should fail
+        let dir = tempfile::tempdir().unwrap();
+        let result = check_disk_space(dir.path(), u64::MAX);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Insufficient disk space"), "Error should mention insufficient space: {}", err);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_get_free_disk_space_returns_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let free = get_free_disk_space(dir.path()).unwrap();
+        // Should return a positive number (at least 1MB on any real disk)
+        assert!(free > 1024 * 1024, "Expected at least 1MB free, got {} bytes", free);
     }
 }

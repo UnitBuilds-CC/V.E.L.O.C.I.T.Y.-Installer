@@ -29,6 +29,8 @@ zstd = "0.13"
 tar = "0.4"
 lzma-rs = "0.3"
 bsdiff = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = "1"
 
 # Windows APIs (Windows-only)
 windows = { version = "0.62", features = [
