@@ -119,6 +119,10 @@ pub fn run_fetch_install(
     std::fs::create_dir_all(install_dir)
         .context("Failed to create install directory")?;
 
+    // Step 4a: Initialize install log file
+    let log_path = install_dir.join(".velocity-install.log");
+    init_install_log(&log_path, config, &version_info, current_version);
+
     // Step 4b: Check disk space (need at least 100MB free, or 2x estimated size)
     let estimated_size: u64 = version_info.assets.iter()
         .map(|a| a.size)
@@ -144,8 +148,9 @@ pub fn run_fetch_install(
     );
 
     // Clean up partial downloads on failure
-    if let Err(ref _e) = download_result {
+    if let Err(ref e) = download_result {
         warn!("Download failed, cleaning up partial files...");
+        finalize_install_log(&log_path, false, &format!("Installation failed: {}", e));
         for path in &downloaded_paths {
             if path.exists() {
                 if let Err(e) = std::fs::remove_file(path) {
@@ -160,6 +165,9 @@ pub fn run_fetch_install(
     // Step 5: Write installed version atomically
     write_installed_version(install_dir, &version_info.version)
         .context("Failed to write installed version file")?;
+
+    // Step 5b: Finalize install log
+    finalize_install_log(&log_path, true, "Installation completed successfully");
 
     // Step 6: Report completion
     report_progress(&progress_cb, "complete", 0, 0, "Installation complete!");
@@ -242,6 +250,12 @@ fn download_all_files(
             *files_downloaded += 1;
             
             info!("Downloaded: {} ({} bytes, action: {:?})", asset.name, file_size, action);
+
+            // Validate downloaded file content (detect HTML/JSON error pages)
+            if action == FetchAction::Execute || action == FetchAction::Extract {
+                validate_downloaded_file(&path, &asset.name)
+                    .with_context(|| format!("Downloaded file validation failed for: {}", asset.name))?;
+            }
 
             // Handle action-specific post-download processing
             match action {
@@ -387,6 +401,163 @@ pub fn write_installed_version(install_dir: &Path, version: &str) -> Result<()> 
     Ok(())
 }
 
+/// Initialize the install log file with header information.
+///
+/// Writes a timestamped log header with install configuration details
+/// for post-mortem troubleshooting.
+fn init_install_log(
+    log_path: &Path,
+    config: &FetchConfig,
+    version_info: &fetch::VersionInfo,
+    current_version: Option<&str>,
+) {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let mut log = String::new();
+    log.push_str(&format!("=== Velocity Installer Log ===\n"));
+    log.push_str(&format!("Timestamp: {}\n", now));
+    log.push_str(&format!("Version: {} -> {}\n",
+        current_version.unwrap_or("(none)"), version_info.version));
+    log.push_str(&format!("Mode: {:?}\n", config.mode));
+    if let Some(ref url) = config.base_url {
+        log.push_str(&format!("URL: {}\n", url));
+    }
+    if let Some(ref repo) = config.repo {
+        log.push_str(&format!("Repo: {}\n", repo));
+    }
+    log.push_str(&format!("Assets to download: {}\n", version_info.assets.len()));
+    for asset in &version_info.assets {
+        log.push_str(&format!("  - {} ({} bytes)\n", asset.name, asset.size));
+    }
+    log.push_str(&format!("Download patterns: {}\n", config.files.download.len()));
+    for pat in &config.files.download {
+        log.push_str(&format!("  - pattern='{}' dest='{}' action={:?}\n",
+            pat.pattern, pat.dest, pat.action));
+    }
+    log.push_str("================================\n\n");
+
+    if let Err(e) = std::fs::write(log_path, &log) {
+        debug!("Failed to write install log: {}", e);
+    }
+}
+
+/// Append a completion entry to the install log.
+fn finalize_install_log(log_path: &Path, success: bool, message: &str) {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let status = if success { "SUCCESS" } else { "FAILED" };
+    let entry = format!("\n[{}] {} — {}\n", now, status, message);
+    if let Err(e) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+    {
+        debug!("Failed to finalize install log: {}", e);
+    }
+}
+
+/// Validate that a downloaded file is actually a binary, not an HTML/JSON error page.
+///
+/// Many download URLs redirect to login pages, 404 pages, or rate-limit responses.
+/// This checks the first bytes for known text-based error signatures:
+/// - HTML: `<!DOCTYPE`, `<html`, `<?xml`
+/// - JSON: `{"message":`, `{"error":`
+/// - Plain text errors: `404 Not Found`, `403 Forbidden`, `Rate limit`
+///
+/// Only validates files with executable/archive extensions (.exe, .msi, .zip, etc.).
+/// Skips validation for files with unknown extensions.
+fn validate_downloaded_file(path: &Path, asset_name: &str) -> Result<()> {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    // Only validate files that should be binary
+    let should_validate = matches!(ext.as_str(),
+        "exe" | "msi" | "msm" | "zip" | "tar" | "gz" | "tgz" | "7z" | "bin");
+
+    if !should_validate {
+        return Ok(());
+    }
+
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if file_size == 0 {
+        anyhow::bail!("Downloaded file is empty (0 bytes): {}", asset_name);
+    }
+
+    // Read first 512 bytes for content sniffing
+    let mut buf = [0u8; 512];
+    let read_len = {
+        let mut f = std::fs::File::open(path)?;
+        use std::io::Read;
+        f.read(&mut buf).unwrap_or(0)
+    };
+    let sniff = &buf[..read_len];
+
+    // Check if content looks like text (HTML, JSON, XML, plain text error)
+    if is_html_content(sniff) {
+        anyhow::bail!(
+            "Downloaded file '{}' appears to be an HTML page (likely a redirect, \
+             login page, or error response), not a binary installer. \
+             Check the download URL.",
+            asset_name
+        );
+    }
+
+    if is_json_error(sniff) {
+        anyhow::bail!(
+            "Downloaded file '{}' appears to be a JSON error response from the API, \
+             not a binary installer. The release asset may not exist for this version.",
+            asset_name
+        );
+    }
+
+    if is_text_error(sniff) {
+        let preview = String::from_utf8_lossy(&sniff[..read_len.min(200)]);
+        anyhow::bail!(
+            "Downloaded file '{}' appears to be a text error response: {}",
+            asset_name, preview.trim()
+        );
+    }
+
+    debug!("Content validation passed for: {} ({} bytes)", asset_name, file_size);
+    Ok(())
+}
+
+/// Check if bytes look like HTML/XML content.
+fn is_html_content(data: &[u8]) -> bool {
+    let lower = String::from_utf8_lossy(data).to_lowercase();
+    let trimmed = lower.trim_start();
+    trimmed.starts_with("<!doctype")
+        || trimmed.starts_with("<html")
+        || trimmed.starts_with("<?xml")
+}
+
+/// Check if bytes look like a JSON error response.
+fn is_json_error(data: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(data).to_lowercase();
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with('{') {
+        return false;
+    }
+    // Common JSON error patterns from APIs
+    trimmed.contains("\"message\"")
+        && (trimmed.contains("\"not found\"")
+            || trimmed.contains("\"error\"")
+            || trimmed.contains("\"requires\"")
+            || trimmed.contains("\"rate\""))
+}
+
+/// Check if bytes look like a plain-text HTTP error.
+fn is_text_error(data: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(data);
+    let trimmed = text.trim_start();
+    // Only flag if the ENTIRE content looks like a short error (not a binary with text embedded)
+    trimmed.starts_with("404 Not Found")
+        || trimmed.starts_with("403 Forbidden")
+        || trimmed.starts_with("500 Internal Server Error")
+        || trimmed.starts_with("Rate limit exceeded")
+}
+
 /// Check that the disk containing `path` has at least `min_bytes` free.
 ///
 /// Uses `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix.
@@ -416,7 +587,6 @@ fn check_disk_space(path: &Path, min_bytes: u64) -> Result<()> {
 /// Get free disk space in bytes for the volume containing `path`.
 #[cfg(target_os = "windows")]
 fn get_free_disk_space(path: &Path) -> Result<u64> {
-    use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
@@ -742,5 +912,124 @@ mod tests {
         let free = get_free_disk_space(dir.path()).unwrap();
         // Should return a positive number (at least 1MB on any real disk)
         assert!(free > 1024 * 1024, "Expected at least 1MB free, got {} bytes", free);
+    }
+
+    // ── Content validation tests ─────────────────────────────────────
+
+    #[test]
+    fn test_validate_rejects_html_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_exe = dir.path().join("installer.exe");
+        std::fs::write(&fake_exe, b"<!DOCTYPE html><html><body>404 Not Found</body></html>").unwrap();
+        let result = validate_downloaded_file(&fake_exe, "installer.exe");
+        assert!(result.is_err(), "Should reject HTML disguised as .exe");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("HTML page"), "Error should mention HTML: {}", err);
+    }
+
+    #[test]
+    fn test_validate_rejects_json_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_zip = dir.path().join("release.zip");
+        std::fs::write(&fake_zip, br#"{"message": "Not Found", "documentation_url": "..."}"#).unwrap();
+        let result = validate_downloaded_file(&fake_zip, "release.zip");
+        assert!(result.is_err(), "Should reject JSON error disguised as .zip");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("JSON error"), "Error should mention JSON: {}", err);
+    }
+
+    #[test]
+    fn test_validate_rejects_text_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_msi = dir.path().join("setup.msi");
+        std::fs::write(&fake_msi, b"404 Not Found").unwrap();
+        let result = validate_downloaded_file(&fake_msi, "setup.msi");
+        assert!(result.is_err(), "Should reject text error page");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("text error"), "Error should mention text error: {}", err);
+    }
+
+    #[test]
+    fn test_validate_rejects_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty.exe");
+        std::fs::write(&empty, b"").unwrap();
+        let result = validate_downloaded_file(&empty, "empty.exe");
+        assert!(result.is_err(), "Should reject empty file");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("empty"), "Error should mention empty: {}", err);
+    }
+
+    #[test]
+    fn test_validate_accepts_binary_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_exe = dir.path().join("real.exe");
+        // MZ header (DOS executable magic bytes)
+        let mut content = vec![0x4D, 0x5A, 0x90, 0x00];
+        content.extend_from_slice(&[0u8; 508]); // pad to 512
+        std::fs::write(&fake_exe, &content).unwrap();
+        let result = validate_downloaded_file(&fake_exe, "real.exe");
+        assert!(result.is_ok(), "Should accept binary content: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_validate_skips_non_binary_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let txt = dir.path().join("readme.txt");
+        std::fs::write(&txt, b"This is just a text file").unwrap();
+        // .txt is not in the validation list, so it should pass
+        let result = validate_downloaded_file(&txt, "readme.txt");
+        assert!(result.is_ok(), "Should skip validation for .txt files");
+    }
+
+    // ── Install log tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_init_install_log_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("install.log");
+        let config = FetchConfig::default();
+        let version_info = fetch::VersionInfo {
+            version: "1.0.0".to_string(),
+            name: Some("Test Release".to_string()),
+            body: None,
+            published_at: None,
+            assets: vec![fetch::ReleaseAsset {
+                name: "app.exe".to_string(),
+                download_url: "https://example.com/app.exe".to_string(),
+                size: 1024,
+                content_type: None,
+                download_count: 0,
+            }],
+        };
+        init_install_log(&log_path, &config, &version_info, Some("0.9.0"));
+        assert!(log_path.exists(), "Log file should be created");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("Velocity Installer Log"), "Should have header");
+        assert!(content.contains("0.9.0 -> 1.0.0"), "Should show version transition");
+        assert!(content.contains("app.exe"), "Should list assets");
+    }
+
+    #[test]
+    fn test_finalize_install_log_appends() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("install.log");
+        std::fs::write(&log_path, "initial content\n").unwrap();
+        finalize_install_log(&log_path, true, "All good");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("initial content"), "Should preserve initial content");
+        assert!(content.contains("SUCCESS"), "Should have SUCCESS status");
+        assert!(content.contains("All good"), "Should have the message");
+    }
+
+    #[test]
+    fn test_finalize_install_log_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("install.log");
+        std::fs::write(&log_path, "header\n").unwrap();
+        finalize_install_log(&log_path, false, "Download failed");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("FAILED"), "Should have FAILED status");
+        assert!(content.contains("Download failed"), "Should have the error message");
     }
 }

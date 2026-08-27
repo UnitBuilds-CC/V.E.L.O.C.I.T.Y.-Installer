@@ -991,6 +991,21 @@ pub struct InstallerConfig {
     /// Default: false.
     #[serde(default)]
     pub add_to_path: bool,
+
+    /// Process names to terminate before installation.
+    /// Each entry is a process name (with or without .exe extension).
+    /// Uses `taskkill /IM /F` to forcefully terminate matching processes.
+    ///
+    /// This is safer than using pre_install with taskkill because it:
+    /// - Logs which processes were found and terminated
+    /// - Continues gracefully if the process isn't running
+    /// - Waits briefly after termination for handles to release
+    ///
+    /// Examples:
+    /// - ["notepad++", "code.exe"]
+    /// - ["MyApp"]
+    #[serde(default)]
+    pub kill_processes: Vec<String>,
 }
 
 /// Auto-update configuration for cloud-fetch installers.

@@ -455,6 +455,11 @@ pub fn execute_with_config(
         }
     }
 
+    // ── Kill processes before install ─────────────────────────────────
+    for proc_name in &config.kill_processes {
+        kill_process_by_name(proc_name);
+    }
+
     // ── Pre-install commands ─────────────────────────────────────────
     for cmd in &config.pre_install {
         info!("Running pre-install command: {}", cmd);
@@ -887,6 +892,45 @@ fn collect_output<R: std::io::Read>(pipe: Option<R>) -> String {
         buf
     } else {
         String::new()
+    }
+}
+
+/// Terminate a process by name using `taskkill /IM /F`.
+///
+/// Logs whether the process was found and terminated.
+/// If the process isn't running, logs at debug level and continues.
+/// After killing, waits 1 second for file handles to release.
+#[cfg(target_os = "windows")]
+fn kill_process_by_name(name: &str) {
+    // Ensure .exe extension
+    let proc_name = if name.to_lowercase().ends_with(".exe") {
+        name.to_string()
+    } else {
+        format!("{}.exe", name)
+    };
+
+    info!("Attempting to terminate process: {}", proc_name);
+    let output = std::process::Command::new("taskkill")
+        .args(["/IM", &proc_name, "/F"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if out.status.success() {
+                info!("Terminated process {}: {}", proc_name, stdout.trim());
+                // Wait briefly for file handles to release
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            } else {
+                // taskkill returns non-zero if process not found — that's OK
+                debug!("Process {} not running or could not be terminated: {}", proc_name, stdout.trim());
+            }
+        }
+        Err(e) => {
+            warn!("Failed to run taskkill for {}: {}", proc_name, e);
+        }
     }
 }
 
@@ -1607,5 +1651,16 @@ mod tests {
         let config: velocity_config::InstallerConfig = toml::from_str(toml).unwrap();
         assert!(config.verify_files.is_empty());
         assert!(!config.add_to_path);
+        assert!(config.kill_processes.is_empty());
+    }
+
+    #[test]
+    fn test_installer_config_kill_processes() {
+        let toml = r#"
+            args = "/S"
+            kill_processes = ["notepad++", "code.exe", "MyApp"]
+        "#;
+        let config: velocity_config::InstallerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.kill_processes, vec!["notepad++", "code.exe", "MyApp"]);
     }
 }
