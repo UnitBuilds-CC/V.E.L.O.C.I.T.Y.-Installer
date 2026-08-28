@@ -626,7 +626,7 @@ fn get_free_disk_space(path: &Path) -> Result<u64> {
 #[cfg(not(target_os = "windows"))]
 fn get_free_disk_space(path: &Path) -> Result<u64> {
     use std::mem;
-    let c_path = std::ffi::CString::new(path.to_string_lossy.as_ref())
+    let c_path = std::ffi::CString::new(path.to_string_lossy().as_ref())
         .context("Invalid path for disk space check")?;
     let mut stat: libc::statvfs = unsafe { mem::zeroed() };
     let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };

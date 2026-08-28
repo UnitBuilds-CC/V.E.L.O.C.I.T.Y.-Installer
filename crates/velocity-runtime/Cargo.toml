@@ -29,3 +29,7 @@ tempfile = "3"
 # Windows-only dependencies
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
+
+# Unix-only dependencies
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libc = "0.2"
