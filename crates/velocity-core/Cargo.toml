@@ -16,6 +16,7 @@ lzma-rs = { workspace = true }
 bsdiff = { workspace = true }
 zip = { workspace = true }
 flate2 = { workspace = true }
+bzip2 = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

@@ -29,6 +29,16 @@ pub enum InstallerType {
     SevenZipSfx,
     /// 7-Zip installer (custom framework, uses `/S`)
     SevenZip,
+    /// Debian package — installed via `dpkg -i`
+    Deb,
+    /// RPM package — installed via `rpm -i`
+    Rpm,
+    /// Shell script installer — executed via `sh`
+    ShellScript,
+    /// macOS pkg installer — executed via `installer -pkg`
+    Pkg,
+    /// macOS disk image — mounted and contents copied
+    Dmg,
     /// Unknown installer — user must provide args or we try common flags
     Unknown,
 }
@@ -41,6 +51,11 @@ impl std::fmt::Display for InstallerType {
             Self::Msi => write!(f, "MSI"),
             Self::SevenZipSfx => write!(f, "7z-SFX"),
             Self::SevenZip => write!(f, "7-Zip"),
+            Self::Deb => write!(f, "DEB"),
+            Self::Rpm => write!(f, "RPM"),
+            Self::ShellScript => write!(f, "ShellScript"),
+            Self::Pkg => write!(f, "PKG"),
+            Self::Dmg => write!(f, "DMG"),
             Self::Unknown => write!(f, "Unknown"),
         }
     }
@@ -131,9 +146,27 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// Detect installer type from file extension.
 fn detect_from_extension(path: &Path) -> InstallerType {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
     match path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) {
         Some(ext) if ext == "msi" || ext == "msm" => InstallerType::Msi,
-        _ => InstallerType::Unknown,
+        Some(ext) if ext == "deb" => InstallerType::Deb,
+        Some(ext) if ext == "rpm" => InstallerType::Rpm,
+        Some(ext) if ext == "pkg" => InstallerType::Pkg,
+        Some(ext) if ext == "dmg" => InstallerType::Dmg,
+        Some(ext) if ext == "sh" || ext == "run" || ext == "appimage" => InstallerType::ShellScript,
+        _ => {
+            // Check compound extensions
+            if name.ends_with(".tar.gz") || name.ends_with(".tar.xz")
+                || name.ends_with(".tar.bz2") || name.ends_with(".tgz")
+                || name.ends_with(".zip")
+            {
+                // Archives are not installers — but if user explicitly
+                // set action=execute, treat as shell script
+                InstallerType::Unknown
+            } else {
+                InstallerType::Unknown
+            }
+        }
     }
 }
 
@@ -146,6 +179,11 @@ pub fn detect_from_file_type(file_type: Option<&str>, path: &Path) -> InstallerT
             "innosetup" | "inno" => return InstallerType::InnoSetup,
             "7z" | "7zsfx" => return InstallerType::SevenZipSfx,
             "7zip" => return InstallerType::SevenZip,
+            "deb" | "debian" => return InstallerType::Deb,
+            "rpm" | "redhat" => return InstallerType::Rpm,
+            "sh" | "shell" | "script" => return InstallerType::ShellScript,
+            "pkg" => return InstallerType::Pkg,
+            "dmg" => return InstallerType::Dmg,
             "exe" => {} // Fall through to binary detection
             _ => {}
         }
@@ -215,6 +253,13 @@ pub fn get_silent_args(installer_type: InstallerType, install_dir: Option<&Path>
             // No default args for unknown installers
             Vec::new()
         }
+        // Unix installer types — these are handled by build_unix_command()
+        // on non-Windows, and have no silent args on Windows.
+        InstallerType::Deb
+        | InstallerType::Rpm
+        | InstallerType::ShellScript
+        | InstallerType::Pkg
+        | InstallerType::Dmg => Vec::new(),
     }
 }
 
@@ -388,20 +433,147 @@ pub fn execute_silent_installer(
     }
 }
 
-/// Stub for non-Windows platforms.
+/// Unix installer execution for Linux and macOS.
+///
+/// Supports:
+/// - `.deb` packages via `dpkg -i` (Linux)
+/// - `.rpm` packages via `rpm -i` (Linux)
+/// - `.sh` / `.run` / AppImage scripts via `sh` (Linux)
+/// - `.pkg` installers via `installer -pkg` (macOS)
+/// - `.dmg` disk images via `hdiutil attach` + copy (macOS)
 #[cfg(not(target_os = "windows"))]
 pub fn execute_silent_installer(
-    _installer_path: &Path,
-    _user_args: Option<&str>,
-    _file_type: Option<&str>,
-    _install_dir: Option<&Path>,
-    _timeout_secs: u64,
+    installer_path: &Path,
+    user_args: Option<&str>,
+    file_type: Option<&str>,
+    install_dir: Option<&Path>,
+    timeout_secs: u64,
 ) -> Result<InstallerResult> {
-    anyhow::bail!(
-        "Silent installer execution is only supported on Windows. \
-         The downloaded file is at: {}",
-        _installer_path.display()
-    )
+    if !installer_path.exists() {
+        anyhow::bail!("Installer file not found: {}", installer_path.display());
+    }
+    let file_size = std::fs::metadata(installer_path).map(|m| m.len()).unwrap_or(0);
+    if file_size == 0 {
+        anyhow::bail!("Installer file is empty (0 bytes): {}", installer_path.display());
+    }
+
+    let installer_type = detect_from_file_type(file_type, installer_path);
+    info!(
+        "Executing Unix installer: {} (type: {}, size: {} bytes, timeout: {}s)",
+        installer_path.display(), installer_type, file_size, timeout_secs
+    );
+
+    let (program, arguments) = build_unix_command(
+        installer_path, user_args, install_dir, installer_type,
+    )?;
+
+    debug!("Running: {} {:?}", program, arguments);
+
+    let mut child = std::process::Command::new(&program)
+        .args(&arguments)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context(format!("Failed to start: {} {:?}", program, arguments))?;
+
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(500);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let success = status.success();
+                if success {
+                    info!("Unix installer completed successfully (exit code: {}, {:.1}s)",
+                        exit_code, start.elapsed().as_secs_f64());
+                    return Ok(InstallerResult { success: true, exit_code, installer_type });
+                } else {
+                    warn!("Unix installer failed with exit code {} (type: {})", exit_code, installer_type);
+                    return Ok(InstallerResult { success: false, exit_code, installer_type });
+                }
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("Installer timed out after {}s: {}", timeout_secs, installer_path.display());
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("Failed to wait for installer: {} ({})", installer_path.display(), e);
+            }
+        }
+    }
+}
+
+/// Build the command to execute a Unix installer.
+#[cfg(not(target_os = "windows"))]
+fn build_unix_command(
+    installer_path: &Path,
+    user_args: Option<&str>,
+    install_dir: Option<&Path>,
+    installer_type: InstallerType,
+) -> Result<(String, Vec<String>)> {
+    let path_str = installer_path.to_string_lossy().to_string();
+
+    match installer_type {
+        InstallerType::Deb => {
+            // dpkg -i package.deb
+            Ok(("dpkg".to_string(), vec!["-i".to_string(), path_str]))
+        }
+        InstallerType::Rpm => {
+            // rpm -i package.rpm (or -Uvh for upgrade)
+            Ok(("rpm".to_string(), vec!["-Uvh".to_string(), path_str]))
+        }
+        InstallerType::ShellScript => {
+            // sh installer.sh [--prefix=/opt/app]
+            let mut args = vec![path_str];
+            if let Some(dir) = install_dir {
+                args.push(format!("--prefix={}", dir.display()));
+            }
+            if let Some(extra) = user_args {
+                args.extend(parse_args(extra));
+            }
+            Ok(("sh".to_string(), args))
+        }
+        InstallerType::Pkg => {
+            // installer -pkg package.pkg -target /
+            let target = install_dir
+                .map(|d| d.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/".to_string());
+            Ok(("installer".to_string(), vec![
+                "-pkg".to_string(), path_str,
+                "-target".to_string(), target,
+            ]))
+        }
+        InstallerType::Dmg => {
+            // Mount DMG, copy .app to /Applications, unmount
+            // We generate a shell script that does all this
+            let dest = install_dir
+                .map(|d| d.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/Applications".to_string());
+            let script = format!(
+                "MOUNT=$(hdiutil attach '{}' -nobrowse -readonly | tail -1 | awk '{{print $3}}'); \
+                 cp -R \"$MOUNT\"/*.app '{}' 2>/dev/null || cp -R \"$MOUNT\"/* '{}'; \
+                 hdiutil detach \"$MOUNT\" -force",
+                path_str, dest, dest
+            );
+            Ok(("sh".to_string(), vec!["-c".to_string(), script]))
+        }
+        _ => {
+            // Unknown: try running directly with optional args
+            let mut args = vec![];
+            if let Some(extra) = user_args {
+                args.extend(parse_args(extra));
+            }
+            Ok((path_str, args))
+        }
+    }
 }
 
 // ─── User-Configurable Installer Execution ────────────────────────────────
@@ -693,18 +865,151 @@ pub fn execute_with_config(
     }
 }
 
-/// Stub for non-Windows platforms.
+/// Unix implementation of execute_with_config.
+///
+/// Mirrors the Windows implementation but uses Unix commands:
+/// - `pkill` instead of `taskkill`
+/// - `sh -c` instead of `cmd /S /C`
+/// - `sudo` for elevation
+/// - `/etc/environment` and shell profiles for PATH
 #[cfg(not(target_os = "windows"))]
 pub fn execute_with_config(
-    _installer_path: &Path,
-    _config: &InstallerConfig,
-    _install_dir: Option<&Path>,
+    installer_path: &Path,
+    config: &InstallerConfig,
+    install_dir: Option<&Path>,
 ) -> Result<InstallerResult> {
-    anyhow::bail!(
-        "Silent installer execution is only supported on Windows. \
-         The downloaded file is at: {}",
-        _installer_path.display()
-    )
+    if !installer_path.exists() {
+        anyhow::bail!("Installer file not found: {}", installer_path.display());
+    }
+    let file_size = std::fs::metadata(installer_path).map(|m| m.len()).unwrap_or(0);
+    if file_size == 0 {
+        anyhow::bail!("Installer file is empty (0 bytes): {}", installer_path.display());
+    }
+
+    info!("Executing Unix installer with custom config: {} ({} bytes)",
+        installer_path.display(), file_size);
+
+    // Kill processes before install
+    for proc_name in &config.kill_processes {
+        unix_kill_process_by_name(proc_name);
+    }
+
+    // Pre-install commands
+    for cmd in &config.pre_install {
+        info!("Running pre-install command: {}", cmd);
+        let status = unix_run_shell_command(cmd)
+            .with_context(|| format!("Failed to run pre-install command: {}", cmd))?;
+        if !status.success() {
+            warn!("Pre-install command exited with code {}: {}",
+                status.code().unwrap_or(-1), cmd);
+        }
+    }
+
+    // Build arguments with placeholder substitution
+    let args_str = if let Some(ref custom_args) = config.args {
+        let substituted = custom_args
+            .replace("{dir}", install_dir.map(|p| p.to_string_lossy().to_string()).as_deref().unwrap_or(""))
+            .replace("{file}", &installer_path.to_string_lossy().to_string());
+        Some(substituted)
+    } else {
+        None
+    };
+
+    let timeout = config.timeout_secs.unwrap_or(300);
+    let program = installer_path.to_string_lossy().to_string();
+    let arguments = if let Some(ref args) = args_str {
+        parse_args(args)
+    } else {
+        vec![]
+    };
+
+    debug!("Unix installer command: {} {}", program, arguments.join(" "));
+
+    let mut cmd = std::process::Command::new(&program);
+    cmd.args(&arguments)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // Set environment variables
+    for (key, value) in &config.env {
+        cmd.env(key, value);
+    }
+
+    // Handle elevation via sudo
+    let needs_elevation = config.elevate.unwrap_or(false);
+    if needs_elevation {
+        cmd = std::process::Command::new("sudo");
+        cmd.arg(&program).args(&arguments)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        for (key, value) in &config.env {
+            cmd.env(key, value);
+        }
+    }
+
+    let mut child = cmd.spawn().with_context(|| {
+        format!("Failed to start: {} {}", program, arguments.join(" "))
+    })?;
+
+    let timeout_dur = std::time::Duration::from_secs(timeout);
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(500);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let is_success = if let Some(ref codes) = config.success_codes {
+                    codes.contains(&exit_code)
+                } else {
+                    status.success()
+                };
+
+                if !is_success {
+                    anyhow::bail!("Unix installer failed with exit code {}", exit_code);
+                }
+
+                info!("Unix installer completed with exit code {}", exit_code);
+
+                // Post-install commands
+                for post_cmd in &config.post_install {
+                    info!("Running post-install command: {}", post_cmd);
+                    let _ = unix_run_shell_command(post_cmd);
+                }
+
+                // Post-install verification
+                unix_verify_installed_files(install_dir, &config.verify_files)?;
+
+                // PATH management
+                if config.add_to_path {
+                    if let Some(dir) = install_dir {
+                        unix_add_to_path(dir)?;
+                    }
+                }
+
+                return Ok(InstallerResult {
+                    installer_type: InstallerType::Unknown,
+                    exit_code,
+                    success: true,
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout_dur {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("Unix installer timed out after {}s: {}",
+                        timeout, installer_path.display());
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("Failed to wait for installer: {} ({})",
+                    installer_path.display(), e);
+            }
+        }
+    }
 }
 
 /// Scan a file for custom signature strings.
@@ -1224,6 +1529,156 @@ pub fn resolve_fetch_action(action: FetchAction) -> &'static str {
     }
 }
 
+// ─── Unix Helper Functions ─────────────────────────────────────────────────
+
+/// Kill a process by name using `pkill` (Unix).
+#[cfg(not(target_os = "windows"))]
+fn unix_kill_process_by_name(name: &str) {
+    info!("Attempting to terminate process: {}", name);
+    let output = std::process::Command::new("pkill")
+        .args(["-f", name])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                info!("Terminated process: {}", name);
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            } else {
+                debug!("Process {} not running or could not be terminated", name);
+            }
+        }
+        Err(e) => warn!("Failed to run pkill for {}: {}", name, e),
+    }
+}
+
+/// Run a command via `sh -c` (Unix).
+#[cfg(not(target_os = "windows"))]
+fn unix_run_shell_command(cmd: &str) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+}
+
+/// Verify that expected files exist after installation (Unix).
+#[cfg(not(target_os = "windows"))]
+fn unix_verify_installed_files(install_dir: Option<&Path>, verify_files: &[String]) -> Result<()> {
+    if verify_files.is_empty() {
+        return Ok(());
+    }
+    let base = install_dir.unwrap_or_else(|| std::path::Path::new("."));
+    let mut missing = Vec::new();
+    for relative_path in verify_files {
+        let full_path = base.join(relative_path);
+        if !full_path.exists() {
+            missing.push(relative_path.clone());
+        }
+    }
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Post-install verification failed — missing files: {}",
+            missing.join(", ")
+        );
+    }
+    info!("Post-install verification passed ({} files checked)", verify_files.len());
+    Ok(())
+}
+
+/// Add a directory to PATH via /etc/environment and shell profiles (Unix).
+///
+/// This modifies:
+/// - `/etc/environment` (system-wide, all shells)
+/// - `~/.profile` (login shell, most shells)
+///
+/// On macOS, also adds to `~/.zshrc` since zsh is the default.
+#[cfg(not(target_os = "windows"))]
+fn unix_add_to_path(dir: &Path) -> Result<()> {
+    let dir_str = dir.to_string_lossy().to_string();
+
+    // Update /etc/environment (system-wide)
+    let etc_env = std::path::Path::new("/etc/environment");
+    if etc_env.exists() {
+        if let Ok(contents) = std::fs::read_to_string(etc_env) {
+            if !contents.contains(&dir_str) {
+                let mut lines: Vec<String> = contents.lines().map(String::from).collect();
+                let mut found = false;
+                for line in &mut lines {
+                    if line.starts_with("PATH=") {
+                        if !line.contains(&dir_str) {
+                            line.push(':');
+                            line.push_str(&dir_str);
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    lines.push(format!("PATH={}", dir_str));
+                }
+                let _ = std::fs::write(etc_env, lines.join("\n") + "\n");
+            }
+        }
+    }
+
+    // Update ~/.profile (user-level, login shells)
+    if let Some(home) = dirs::home_dir() {
+        let profile = home.join(".profile");
+        let export_line = format!("export PATH=\"$PATH:{}\"", dir_str);
+        if let Ok(contents) = std::fs::read_to_string(&profile) {
+            if !contents.contains(&dir_str) {
+                let _ = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&profile)
+                    .and_then(|mut f| {
+                        use std::io::Write;
+                        writeln!(f, "\n# Added by Velocity Installer")?;
+                        writeln!(f, "{}", export_line)?;
+                        Ok(())
+                    });
+            }
+        } else {
+            let _ = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&profile)
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "# Added by Velocity Installer")?;
+                    writeln!(f, "{}", export_line)?;
+                    Ok(())
+                });
+        }
+
+        // On macOS, also update ~/.zshrc (default shell is zsh)
+        #[cfg(target_os = "macos")]
+        {
+            let zshrc = home.join(".zshrc");
+            if let Ok(contents) = std::fs::read_to_string(&zshrc) {
+                if !contents.contains(&dir_str) {
+                    let _ = std::fs::OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(&zshrc)
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "\n# Added by Velocity Installer")?;
+                            writeln!(f, "{}", export_line)?;
+                            Ok(())
+                        });
+                }
+            }
+        }
+    }
+
+    info!("Added to PATH: {}", dir_str);
+    Ok(())
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1662,5 +2117,88 @@ mod tests {
         "#;
         let config: velocity_config::InstallerConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.kill_processes, vec!["notepad++", "code.exe", "MyApp"]);
+    }
+
+    // ── Unix installer type detection tests ────────────────────────────
+
+    #[test]
+    fn test_detect_from_extension_deb() {
+        assert_eq!(
+            detect_from_extension(Path::new("app_1.0.0_amd64.deb")),
+            InstallerType::Deb
+        );
+    }
+
+    #[test]
+    fn test_detect_from_extension_rpm() {
+        assert_eq!(
+            detect_from_extension(Path::new("app-1.0.0.x86_64.rpm")),
+            InstallerType::Rpm
+        );
+    }
+
+    #[test]
+    fn test_detect_from_extension_sh() {
+        assert_eq!(
+            detect_from_extension(Path::new("install.sh")),
+            InstallerType::ShellScript
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("app.run")),
+            InstallerType::ShellScript
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("app.AppImage")),
+            InstallerType::ShellScript
+        );
+    }
+
+    #[test]
+    fn test_detect_from_extension_pkg() {
+        assert_eq!(
+            detect_from_extension(Path::new("installer.pkg")),
+            InstallerType::Pkg
+        );
+    }
+
+    #[test]
+    fn test_detect_from_extension_dmg() {
+        assert_eq!(
+            detect_from_extension(Path::new("app.dmg")),
+            InstallerType::Dmg
+        );
+    }
+
+    #[test]
+    fn test_detect_from_file_type_unix_types() {
+        let path = Path::new("installer.bin");
+        assert_eq!(detect_from_file_type(Some("deb"), path), InstallerType::Deb);
+        assert_eq!(detect_from_file_type(Some("debian"), path), InstallerType::Deb);
+        assert_eq!(detect_from_file_type(Some("rpm"), path), InstallerType::Rpm);
+        assert_eq!(detect_from_file_type(Some("redhat"), path), InstallerType::Rpm);
+        assert_eq!(detect_from_file_type(Some("sh"), path), InstallerType::ShellScript);
+        assert_eq!(detect_from_file_type(Some("shell"), path), InstallerType::ShellScript);
+        assert_eq!(detect_from_file_type(Some("pkg"), path), InstallerType::Pkg);
+        assert_eq!(detect_from_file_type(Some("dmg"), path), InstallerType::Dmg);
+    }
+
+    #[test]
+    fn test_installer_type_display_unix() {
+        assert_eq!(format!("{}", InstallerType::Deb), "DEB");
+        assert_eq!(format!("{}", InstallerType::Rpm), "RPM");
+        assert_eq!(format!("{}", InstallerType::ShellScript), "ShellScript");
+        assert_eq!(format!("{}", InstallerType::Pkg), "PKG");
+        assert_eq!(format!("{}", InstallerType::Dmg), "DMG");
+    }
+
+    #[test]
+    fn test_get_silent_args_unix_types_empty() {
+        // Unix installer types return empty silent args on Windows
+        // (they are handled by build_unix_command on Unix)
+        assert!(get_silent_args(InstallerType::Deb, None).is_empty());
+        assert!(get_silent_args(InstallerType::Rpm, None).is_empty());
+        assert!(get_silent_args(InstallerType::ShellScript, None).is_empty());
+        assert!(get_silent_args(InstallerType::Pkg, None).is_empty());
+        assert!(get_silent_args(InstallerType::Dmg, None).is_empty());
     }
 }

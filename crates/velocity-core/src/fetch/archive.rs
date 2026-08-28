@@ -4,6 +4,8 @@
 //! - ZIP archives (`.zip`) — using the `zip` crate
 //! - TAR archives (`.tar`) — using the `tar` crate
 //! - TAR + gzip (`.tar.gz`, `.tgz`) — using `tar` + `flate2`
+//! - TAR + xz (`.tar.xz`, `.txz`) — using `tar` + `lzma-rs`
+//! - TAR + bzip2 (`.tar.bz2`, `.tbz2`) — using `tar` + `bzip2`
 //!
 //! The main entry point is `extract_archive()` which auto-detects the format
 //! from the file extension and extracts to the target directory.
@@ -19,6 +21,8 @@ pub enum ArchiveFormat {
     Zip,
     Tar,
     TarGz,
+    TarXz,
+    TarBz2,
 }
 
 /// Detect archive format from file extension.
@@ -26,6 +30,10 @@ pub fn detect_archive_format(path: &Path) -> Option<ArchiveFormat> {
     let name = path.file_name()?.to_str()?.to_lowercase();
     if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
         Some(ArchiveFormat::TarGz)
+    } else if name.ends_with(".tar.xz") || name.ends_with(".txz") {
+        Some(ArchiveFormat::TarXz)
+    } else if name.ends_with(".tar.bz2") || name.ends_with(".tbz2") {
+        Some(ArchiveFormat::TarBz2)
     } else if name.ends_with(".tar") {
         Some(ArchiveFormat::Tar)
     } else if name.ends_with(".zip") {
@@ -66,6 +74,20 @@ pub fn extract_archive(archive_path: &Path, dest_dir: &Path) -> Result<u64> {
             let file = std::fs::File::open(archive_path)
                 .with_context(|| format!("Failed to open TAR.GZ: {}", archive_path.display()))?;
             let decoder = flate2::read::GzDecoder::new(file);
+            extract_tar_from_reader(decoder, dest_dir)
+        }
+        ArchiveFormat::TarXz => {
+            let file = std::fs::File::open(archive_path)
+                .with_context(|| format!("Failed to open TAR.XZ: {}", archive_path.display()))?;
+            let mut decoder = Vec::new();
+            lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut decoder)
+                .with_context(|| format!("Failed to decompress XZ: {}", archive_path.display()))?;
+            extract_tar_from_reader(std::io::Cursor::new(decoder), dest_dir)
+        }
+        ArchiveFormat::TarBz2 => {
+            let file = std::fs::File::open(archive_path)
+                .with_context(|| format!("Failed to open TAR.BZ2: {}", archive_path.display()))?;
+            let decoder = bzip2::read::BzDecoder::new(file);
             extract_tar_from_reader(decoder, dest_dir)
         }
     }
@@ -178,9 +200,14 @@ mod tests {
         assert_eq!(detect_archive_format(Path::new("app.tar")), Some(ArchiveFormat::Tar));
         assert_eq!(detect_archive_format(Path::new("app.tar.gz")), Some(ArchiveFormat::TarGz));
         assert_eq!(detect_archive_format(Path::new("app.tgz")), Some(ArchiveFormat::TarGz));
+        assert_eq!(detect_archive_format(Path::new("app.tar.xz")), Some(ArchiveFormat::TarXz));
+        assert_eq!(detect_archive_format(Path::new("app.txz")), Some(ArchiveFormat::TarXz));
+        assert_eq!(detect_archive_format(Path::new("app.tar.bz2")), Some(ArchiveFormat::TarBz2));
+        assert_eq!(detect_archive_format(Path::new("app.tbz2")), Some(ArchiveFormat::TarBz2));
         assert_eq!(detect_archive_format(Path::new("app.exe")), None);
         assert_eq!(detect_archive_format(Path::new("app.msi")), None);
         assert_eq!(detect_archive_format(Path::new("APP.ZIP")), Some(ArchiveFormat::Zip));
+        assert_eq!(detect_archive_format(Path::new("APP.TAR.XZ")), Some(ArchiveFormat::TarXz));
     }
 
     #[test]

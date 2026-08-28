@@ -28,6 +28,7 @@ toml = "0.8"
 zstd = "0.13"
 tar = "0.4"
 lzma-rs = "0.3"
+bzip2 = "0.5"
 bsdiff = "0.2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = "1"
